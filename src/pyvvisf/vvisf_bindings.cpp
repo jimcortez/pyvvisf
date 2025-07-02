@@ -815,16 +815,29 @@ PYBIND11_MODULE(vvisf_bindings, m) {
 
     // --- VVGL::GLBufferPool bindings ---
     py::class_<VVGL::GLBufferPool, std::shared_ptr<VVGL::GLBufferPool>>(m, "GLBufferPool")
-        .def(py::init<>())
+        .def(py::init([]() {
+            // Ensure GLFW context is initialized before creating buffer pool
+            if (!initialize_glfw_context()) {
+                throw std::runtime_error("Failed to initialize GLFW context");
+            }
+            // Create a GLBufferPool that uses the current GLFW context
+            // We pass nullptr to let the pool use the current context instead of creating a new one
+            return std::make_shared<VVGL::GLBufferPool>(nullptr);
+        }))
         .def("create_buffer", [](std::shared_ptr<VVGL::GLBufferPool>& self, const VVGL::Size& size) {
             using namespace VVGL;
+            // Ensure GLFW context is current before creating buffer
+            if (!ensure_gl_context_current()) {
+                throw std::runtime_error("Failed to make OpenGL context current");
+            }
             GLBuffer::Descriptor desc;
             desc.type = GLBuffer::Type_Tex;
             desc.target = static_cast<GLBuffer::Target>(Target_2D);
             desc.internalFormat = static_cast<GLBuffer::InternalFormat>(IF_RGBA);
             desc.pixelFormat = static_cast<GLBuffer::PixelFormat>(PF_RGBA);
             desc.pixelType = static_cast<GLBuffer::PixelType>(PT_UByte);
-            return self->createBufferRef(desc, size);
+            // Pass true to createInCurrentContext to use the GLFW context
+            return self->createBufferRef(desc, size, nullptr, VVGL::Size(), true);
         }, py::arg("size"));
 
     // Note: All buffer/image operations require the OpenGL context to be current (GLFW context). Provide helpers in Python for context management.
