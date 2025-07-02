@@ -8,6 +8,8 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     PLATFORM="linux"
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     PLATFORM="macos"
+elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ -n "$WINDIR" ]]; then
+    PLATFORM="windows"
 else
     echo "Unsupported platform: $OSTYPE"
     exit 1
@@ -113,6 +115,24 @@ elif [[ "$PLATFORM" == "macos" ]]; then
         echo "Homebrew not found. Please install manually:"
         echo "  brew install cmake glfw glew pkg-config"
         exit 1
+    fi
+
+elif [[ "$PLATFORM" == "windows" ]]; then
+    # For Windows, we need to use PowerShell
+    echo "Detected Windows platform"
+    
+    # Check if we're in a cibuildwheel environment
+    if [[ -n "$CIBW_PLATFORM" ]]; then
+        echo "Running in cibuildwheel environment, using PowerShell script..."
+        # Call the PowerShell script for Windows-specific setup
+        if [[ -f "scripts/install_dependencies.ps1" ]]; then
+            powershell -ExecutionPolicy Bypass -File scripts/install_dependencies.ps1
+        else
+            echo "Windows PowerShell script not found: scripts/install_dependencies.ps1"
+            exit 1
+        fi
+    else
+        echo "Not in cibuildwheel environment, skipping Windows-specific setup"
     fi
 fi
 

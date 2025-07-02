@@ -130,11 +130,11 @@ jobs:
           exit 1
         }
 
-    - name: Build VVISF libraries (Linux/macOS)
-      if: runner.os != 'Windows'
+    - name: Build VVISF libraries (Linux)
+      if: runner.os == 'Linux'
       shell: bash
       run: |
-        echo "Building VVISF libraries..."
+        echo "Building VVISF libraries on Linux..."
         echo "Current directory: $(pwd)"
         echo "Checking VVISF-GL submodule..."
         ls -la external/VVISF-GL/
@@ -186,9 +186,7 @@ jobs:
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.0.0
       env:
-        CIBW_BEFORE_ALL_LINUX: scripts/install_dependencies.sh
-        CIBW_BEFORE_ALL_MACOS: scripts/install_dependencies.sh
-        CIBW_BEFORE_ALL_WINDOWS: scripts/install_dependencies.ps1
+        CIBW_BEFORE_ALL: scripts/install_dependencies.sh
         CIBW_ENVIRONMENT: VVISF_BUILD_TYPE=wheel
         CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
         CIBW_SKIP: "*-musllinux*"
