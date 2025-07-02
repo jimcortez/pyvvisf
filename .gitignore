@@ -200,9 +200,8 @@ ehthumbs.db
 Thumbs.db
 
 # External dependencies (managed as submodules)
-external/VVISF-GL/
-
-# VVISF specific
+# external/VVISF-GL/  # Commented out to allow submodule
+# Build artifacts from external dependencies
 external/VVISF-GL/VVGL/bin/
 external/VVISF-GL/VVISF/bin/
 external/VVISF-GL/VVGL/obj/
