@@ -20,8 +20,21 @@ jobs:
 
     - name: Initialize submodules
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Repository contents:"
+        ls -la
+        echo "Git submodule status:"
+        git submodule status
+        echo "Initializing submodules..."
         git submodule update --init --recursive
-        ls -la external/
+        echo "After submodule initialization:"
+        ls -la
+        if [ -d "external" ]; then
+          echo "External directory contents:"
+          ls -la external/
+        else
+          echo "ERROR: external/ directory not found after submodule initialization"
+          exit 1
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -55,8 +68,21 @@ jobs:
 
     - name: Initialize submodules
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Repository contents:"
+        ls -la
+        echo "Git submodule status:"
+        git submodule status
+        echo "Initializing submodules..."
         git submodule update --init --recursive
-        ls -la external/
+        echo "After submodule initialization:"
+        ls -la
+        if [ -d "external" ]; then
+          echo "External directory contents:"
+          ls -la external/
+        else
+          echo "ERROR: external/ directory not found after submodule initialization"
+          exit 1
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.0.0
