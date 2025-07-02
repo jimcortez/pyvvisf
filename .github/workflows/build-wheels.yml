@@ -68,6 +68,11 @@ jobs:
         CIBW_MACOS_ARCHS: "x86_64 arm64 universal2"
         CIBW_LINUX_ARCHS: "x86_64 aarch64"
         CIBW_WINDOWS_ARCHS: "x64"
+        # Use newer manylinux images instead of deprecated manylinux2014
+        CIBW_MANYLINUX_X86_64_IMAGE: "quay.io/pypa/manylinux_2_28_x86_64:2024-01-23-3c254a1"
+        CIBW_MANYLINUX_AARCH64_IMAGE: "quay.io/pypa/manylinux_2_28_aarch64:2024-01-23-3c254a1"
+        CIBW_MANYLINUX_PYPY_X86_64_IMAGE: "quay.io/pypa/manylinux_2_28_x86_64:2024-01-23-3c254a1"
+        CIBW_MANYLINUX_PYPY_AARCH64_IMAGE: "quay.io/pypa/manylinux_2_28_aarch64:2024-01-23-3c254a1"
       run: |
         python -m cibuildwheel --platform auto --output-dir wheelhouse
 
