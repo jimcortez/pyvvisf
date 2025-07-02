@@ -40,7 +40,19 @@ jobs:
     - name: Build VVISF libraries
       run: |
         echo "Building VVISF libraries..."
+        echo "Current directory: $(pwd)"
+        echo "Checking VVISF-GL submodule..."
+        ls -la external/VVISF-GL/
+        echo "Checking for required dependencies..."
+        which gcc || echo "gcc not found"
+        which g++ || echo "g++ not found"
+        which make || echo "make not found"
+        echo "Installing system dependencies..."
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake libglfw3-dev libglew-dev
+        echo "Making build script executable..."
         chmod +x scripts/build_vvisf.sh
+        echo "Running build script..."
         ./scripts/build_vvisf.sh
         echo "VVISF libraries built successfully"
 
@@ -96,7 +108,19 @@ jobs:
     - name: Build VVISF libraries
       run: |
         echo "Building VVISF libraries..."
+        echo "Current directory: $(pwd)"
+        echo "Checking VVISF-GL submodule..."
+        ls -la external/VVISF-GL/
+        echo "Checking for required dependencies..."
+        which gcc || echo "gcc not found"
+        which g++ || echo "g++ not found"
+        which make || echo "make not found"
+        echo "Installing system dependencies..."
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake libglfw3-dev libglew-dev
+        echo "Making build script executable..."
         chmod +x scripts/build_vvisf.sh
+        echo "Running build script..."
         ./scripts/build_vvisf.sh
         echo "VVISF libraries built successfully"
 
