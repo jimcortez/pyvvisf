@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-20.04, windows-2019, macos-10.15]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
     - name: Checkout
@@ -55,7 +55,7 @@ jobs:
 
   build-sdist:
     name: Build source distribution
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout
       uses: actions/checkout@v3
@@ -84,7 +84,7 @@ jobs:
   upload-to-pypi:
     name: Upload to PyPI
     needs: [build-wheels, build-sdist]
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     if: github.event_name == 'release'
     steps:
     - name: Download all artifacts
