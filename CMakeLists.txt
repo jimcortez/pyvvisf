@@ -3,11 +3,18 @@ project(pyvvisf)
 
 # Check if VVISF-GL submodule exists
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/README.md")
-    message(FATAL_ERROR 
-        "VVISF-GL submodule not found!\n"
-        "Please run: git submodule update --init --recursive\n"
-        "Or run: ./scripts/setup.sh"
-    )
+    if(BUILDING_WHEEL)
+        message(FATAL_ERROR 
+            "VVISF-GL not found during wheel build!\n"
+            "This should be handled by the setup.py build process."
+        )
+    else()
+        message(FATAL_ERROR 
+            "VVISF-GL submodule not found!\n"
+            "Please run: git submodule update --init --recursive\n"
+            "Or run: ./scripts/setup.sh"
+        )
+    endif()
 endif()
 
 # Set C++ standard
@@ -30,6 +37,38 @@ elseif(WIN32)
 else()
     set(PLATFORM "Unknown")
     message(WARNING "Unknown platform detected. VVISF may not work correctly.")
+endif()
+
+# Check if we're building for wheel distribution
+if(DEFINED ENV{VVISF_BUILD_TYPE} AND $ENV{VVISF_BUILD_TYPE} STREQUAL "wheel")
+    message(STATUS "Building for wheel distribution")
+    set(BUILDING_WHEEL TRUE)
+else()
+    set(BUILDING_WHEEL FALSE)
+endif()
+
+# Architecture detection and configuration
+if(DEFINED ENV{ARCH})
+    set(TARGET_ARCH $ENV{ARCH})
+    message(STATUS "Target architecture: ${TARGET_ARCH}")
+    
+    if(APPLE)
+        if(TARGET_ARCH STREQUAL "universal2")
+            set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64")
+            message(STATUS "Building universal2 binary for macOS")
+        else()
+            set(CMAKE_OSX_ARCHITECTURES ${TARGET_ARCH})
+            message(STATUS "Building for architecture: ${TARGET_ARCH}")
+        endif()
+    elseif(UNIX AND NOT APPLE)
+        if(TARGET_ARCH STREQUAL "aarch64")
+            set(CMAKE_SYSTEM_PROCESSOR "aarch64")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native")
+        else()
+            set(CMAKE_SYSTEM_PROCESSOR "x86_64")
+            set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -mtune=native")
+        endif()
+    endif()
 endif()
 
 message(STATUS "Platform: ${PLATFORM}")
@@ -55,11 +94,19 @@ set(VVISF_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVISF/bin/libVVI
 
 # Check if libraries exist
 if(NOT EXISTS ${VVGL_LIBRARY})
-    message(FATAL_ERROR "VVGL library not found: ${VVGL_LIBRARY}")
+    if(BUILDING_WHEEL)
+        message(FATAL_ERROR "VVGL library not found during wheel build: ${VVGL_LIBRARY}")
+    else()
+        message(FATAL_ERROR "VVGL library not found: ${VVGL_LIBRARY}")
+    endif()
 endif()
 
 if(NOT EXISTS ${VVISF_LIBRARY})
-    message(FATAL_ERROR "VVISF library not found: ${VVISF_LIBRARY}")
+    if(BUILDING_WHEEL)
+        message(FATAL_ERROR "VVISF library not found during wheel build: ${VVISF_LIBRARY}")
+    else()
+        message(FATAL_ERROR "VVISF library not found: ${VVISF_LIBRARY}")
+    endif()
 endif()
 
 message(STATUS "Using VVGL library: ${VVGL_LIBRARY}")

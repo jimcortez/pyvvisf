@@ -1,10 +1,16 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel", "pybind11>=2.6.0"]
+requires = [
+    "setuptools>=61.0", 
+    "wheel", 
+    "pybind11>=2.6.0",
+    "setuptools_scm[toml]>=6.2",
+    "ninja>=1.10.0"
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyvvisf"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python bindings for VVISF (Vidvox Interactive Shader Format) using pybind11"
 readme = "README.md"
 license = {text = "MIT"}
@@ -24,10 +30,10 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Operating System :: OS Independent",
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "pybind11>=2.6.0",
     "numpy>=1.21.0",
     "pillow>=9.0.0",
 ]
@@ -41,6 +47,8 @@ dev = [
     "flake8>=5.0.0",
     "mypy>=1.0.0",
     "pre-commit>=2.20.0",
+    "cibuildwheel>=3.0.0",
+    "build>=0.10.0",
 ]
 
 [project.urls]
@@ -51,6 +59,26 @@ Issues = "https://github.com/jimcortez/pyvvisf/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools_scm]
+write_to = "src/pyvvisf/_version.py"
+
+[tool.cibuildwheel]
+# Build for multiple platforms
+build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*"]
+skip = ["*-musllinux*"]  # Skip musl builds for now
+
+[tool.cibuildwheel.linux]
+before-all = "scripts/install_dependencies.sh"
+environment = { VVISF_BUILD_TYPE = "wheel" }
+
+[tool.cibuildwheel.macos]
+before-all = "scripts/install_dependencies.sh"
+environment = { VVISF_BUILD_TYPE = "wheel" }
+
+[tool.cibuildwheel.windows]
+before-all = "scripts/install_dependencies.bat"
+environment = { VVISF_BUILD_TYPE = "wheel" }
 
 [tool.black]
 line-length = 88

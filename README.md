@@ -11,129 +11,25 @@ pyvvisf provides Python bindings for the VVISF library, allowing you to work wit
 - Managing OpenGL contexts and buffers
 - Working with shader inputs and parameters
 
-## Prerequisites
+## Quick Start
 
-### Python Environment
+### Installation
 
-This project uses **pyenv** for Python version management. The required Python version is specified in `.python-version`.
-
-#### Install pyenv
-
-**macOS:**
-```bash
-brew install pyenv
-```
-
-**Ubuntu/Debian:**
-```bash
-curl https://pyenv.run | bash
-```
-
-**Windows:**
-Download from [pyenv-win](https://github.com/pyenv-win/pyenv-win)
-
-#### Set up Python environment
-```bash
-# Install the required Python version (if not already installed)
-pyenv install 3.11.7
-
-# Set the local version for this project
-pyenv local 3.11.7
-```
-
-### System Dependencies
-
-#### macOS
-```bash
-# Install Homebrew if you haven't already
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# Install required dependencies
-brew install cmake glfw glew
-```
-
-#### Ubuntu/Debian
-```bash
-sudo apt-get update
-sudo apt-get install cmake libglfw3-dev libglew-dev python3-dev python3-pip
-```
-
-#### Windows
-- Install Visual Studio 2019 or later with C++ development tools
-- Install CMake from https://cmake.org/download/
-- Install GLFW and GLEW via vcpkg or build from source
-
-### Python Dependencies
-
-The project automatically installs required Python dependencies including pybind11.
-
-## Installation
-
-### From Source
-
-1. **Clone the repository and initialize submodules**:
-   ```bash
-   git clone https://github.com/jimcortez/pyvvisf.git
-   cd pyvvisf
-   git submodule update --init --recursive
-   ```
-
-2. **Quick Build (Recommended)**:
-   ```bash
-   # Use the automated build script
-   ./scripts/build.sh
-   ```
-
-   This script will:
-   - Check all dependencies
-   - Clean previous builds
-   - Clone and patch VVISF-GL
-   - Build VVGL and VVISF libraries
-   - Build the Python extension
-   - Run basic tests
-
-3. **Manual Build**:
-   ```bash
-   # Set Python version
-   pyenv local 3.11.7
-   
-   # Apply GLFW support patches
-   cd external/VVISF-GL
-   git apply ../../patches/vvisf-glfw-support.patch
-   cd ../..
-   
-   # Build VVGL and VVISF libraries
-   cd external/VVISF-GL/VVGL
-   make clean
-   ARCH=arm64 make
-   cd ../VVISF
-   make clean
-   ARCH=arm64 make
-   cd ../..
-   
-   # Build Python extension
-   mkdir build && cd build
-   cmake ..
-   make
-   cd ..
-   ```
-
-4. **Install Python package** (optional):
-   ```bash
-   pip install -e .
-   ```
-
-### Development Installation
-
-For development, you can install with additional tools:
+**Recommended: Install from wheels (easiest)**
 
 ```bash
-pip install -e ".[dev]"
+pip install pyvvisf
 ```
 
-## Usage
+**From source (for development)**
 
-### Basic Example
+```bash
+git clone https://github.com/jimcortez/pyvvisf.git
+cd pyvvisf
+pip install -e .
+```
+
+### Basic Usage
 
 ```python
 import pyvvisf
@@ -199,136 +95,60 @@ default_files = pyvvisf.get_default_isf_files()
 print(f"Default ISF files: {default_files}")
 ```
 
-### Managing OpenGL Context
+## Platform Support
 
-```python
-import pyvvisf
+pyvvisf supports the following platforms:
 
-# Get platform and OpenGL information
-print(f"Platform: {pyvvisf.get_platform_info()}")
-print(f"OpenGL Info: {pyvvisf.get_gl_info()}")
+- **Linux**: Ubuntu 20.04+ (x86_64, aarch64)
+- **macOS**: 10.15+ (x86_64, arm64, universal2)
+- **Windows**: Windows 2019+ (x64)
 
-# Reinitialize context if needed
-pyvvisf.reinitialize_glfw_context()
+Python versions: 3.8, 3.9, 3.10, 3.11, 3.12
 
-# Check if VVISF is available
-if pyvvisf.is_vvisf_available():
-    print("VVISF is working correctly!")
-```
+## Dependencies
 
-## Development
+### Runtime Dependencies
+- `numpy>=1.21.0`
+- `pillow>=9.0.0`
 
-### Building from Source
+### System Dependencies
+- **Linux**: GLFW, GLEW, OpenGL development libraries
+- **macOS**: GLFW, GLEW (via Homebrew)
+- **Windows**: GLFW, GLEW (via vcpkg)
 
-```bash
-# Set up development environment
-make setup
+These are automatically handled when installing from wheels.
 
-# Build the project
-make build
+## Documentation
 
-# Run tests
-make test
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[Building from Source](docs/BUILDING.md)** - Detailed build instructions
+- **[Development Guide](docs/DEVELOPMENT.md)** - Guide for contributors
+- **[Full Documentation](docs/README.md)** - Complete documentation index
 
-# Clean build artifacts
-make clean
-```
+## Examples
 
-### Development Tools
+See the `examples/` directory for more usage examples:
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run linting
-make lint
-
-# Format code
-make format
-
-# Check dependencies
-make check-deps
+# Run the basic usage example
+python examples/basic_usage.py
 ```
-
-### Project Structure
-
-```
-pyvvisf/
-├── src/pyvvisf/           # Python package
-│   ├── __init__.py        # Package initialization
-│   └── vvisf_bindings.cpp # C++ bindings source
-├── external/              # External dependencies
-│   └── VVISF-GL/         # VVISF-GL submodule
-├── scripts/              # Build scripts
-├── tests/                # Test files
-├── examples/             # Usage examples
-├── docs/                 # Documentation
-├── CMakeLists.txt        # CMake configuration
-├── setup.py              # Python setup
-├── pyproject.toml        # Project configuration
-├── .python-version       # Python version specification
-└── Makefile              # Build automation
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **pyenv not found**: Install pyenv using the instructions above
-2. **Python version mismatch**: Run `pyenv local 3.11.7` in the project directory
-3. **GLFW/GLEW not found**: Ensure system dependencies are installed
-4. **VVISF libraries not built**: Run `./scripts/build_vvisf.sh`
-5. **OpenGL context issues**: Try `reinitialize_glfw_context()`
-6. **Import errors**: Ensure the C++ extension is built
-
-### Debug Information
-
-```python
-import pyvvisf
-
-# Get detailed system information
-print(f"Platform: {pyvvisf.get_platform_info()}")
-print(f"OpenGL Info: {pyvvisf.get_gl_info()}")
-print(f"VVISF Available: {pyvvisf.is_vvisf_available()}")
-```
-
-### Environment Setup
-
-If you're having issues with the Python environment:
-
-```bash
-# Check current Python version
-python --version
-
-# Check pyenv versions
-pyenv versions
-
-# Install required version if missing
-pyenv install 3.11.7
-
-# Set local version
-pyenv local 3.11.7
-
-# Verify installation
-python --version
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite
-6. Submit a pull request
+We welcome contributions! Please see our [Development Guide](docs/DEVELOPMENT.md) for details on:
+
+- Setting up a development environment
+- Building from source
+- Running tests
+- Submitting pull requests
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- VVISF-GL: The underlying C++ library for ISF support
-- pybind11: Python binding library
-- GLFW: OpenGL context management
-- GLEW: OpenGL extension loading 
+- [VVISF](https://isf.video/) - The Interactive Shader Format specification
+- [VVGL](https://github.com/mrRay/VVISF-GL) - The underlying C++ library
+- [pybind11](https://pybind11.readthedocs.io/) - Python binding framework 
