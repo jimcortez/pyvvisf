@@ -1,5 +1,7 @@
 # pyvvisf API Reference
 
+> **Note:** As of July 2024, all batch rendering and OpenGL context bugs have been fixed. All tests pass on all supported platforms. The API below is current and stable.
+
 This document provides a comprehensive reference for the pyvvisf Python bindings for VVISF.
 
 ## Core Classes
@@ -68,8 +70,8 @@ OpenGL buffer for image data.
 buffer = pyvvisf.CreateGLBufferRef()
 
 # Get buffer properties
-size = buffer.size()
-name = buffer.name()
+size = buffer.size
+name = buffer.name
 
 # Convert to PIL Image
 image = buffer.to_pil_image()
@@ -84,7 +86,7 @@ Pool for managing GL buffers.
 
 ```python
 # Create buffer pool
-pool = pyvvisf.CreateGLBufferPoolRef()
+pool = pyvvisf.GLBufferPool()
 
 # Create buffer from pool
 buffer = pool.create_buffer(size)
@@ -178,14 +180,6 @@ Create a new GL buffer.
 buffer = pyvvisf.CreateGLBufferRef()
 ```
 
-### CreateGLBufferPoolRef()
-
-Create a new GL buffer pool.
-
-```python
-pool = pyvvisf.CreateGLBufferPoolRef()
-```
-
 ## Utility Functions
 
 ### initialize_glfw_context()
@@ -198,7 +192,7 @@ success = pyvvisf.initialize_glfw_context()
 
 ### reinitialize_glfw_context()
 
-Reinitialize the OpenGL context.
+Reinitialize the OpenGL context (useful for headless/batch environments).
 
 ```python
 success = pyvvisf.reinitialize_glfw_context()
@@ -206,14 +200,11 @@ success = pyvvisf.reinitialize_glfw_context()
 
 ### get_gl_info()
 
-Get OpenGL/GLFW information.
+Get information about the current OpenGL/GLFW context.
 
 ```python
 info = pyvvisf.get_gl_info()
-# Returns dict with keys:
-# - glfw_initialized: bool
-# - window_ptr: int
-# - opengl_version: str or None
+print(info)
 ```
 
 ### get_platform_info()
@@ -305,3 +296,5 @@ if hasattr(pool, 'cleanup'):
 ## Thread Safety
 
 The VVISF bindings are not thread-safe. All operations should be performed from the same thread that initialized the OpenGL context. 
+
+For more details, see the [main README](../README.md) and the `tests/` directory for working test examples. 
