@@ -40,7 +40,7 @@ else()
 endif()
 
 # Check if we're building for wheel distribution
-if(DEFINED ENV{VVISF_BUILD_TYPE} AND $ENV{VVISF_BUILD_TYPE} STREQUAL "wheel")
+if(DEFINED ENV{VVISF_BUILD_TYPE} AND ENV{VVISF_BUILD_TYPE} STREQUAL "wheel")
     message(STATUS "Building for wheel distribution")
     set(BUILDING_WHEEL TRUE)
 else()
