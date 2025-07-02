@@ -1,0 +1,4 @@
+[submodule "external/VVISF-GL"]
+	path = external/VVISF-GL
+	url = https://github.com/Vidvox/VVISF-GL.git
+	branch = master 
