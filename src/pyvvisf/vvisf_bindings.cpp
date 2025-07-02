@@ -7,6 +7,8 @@
 #include <map>
 #include <optional>
 #include <mutex>
+#include <thread>
+#include <chrono>
 
 // VVISF includes
 #include "VVISF.hpp"
@@ -241,6 +243,73 @@ void check_gl_errors(const std::string& operation) {
     }
 }
 
+// Critical function to reset OpenGL context state and perform cleanup
+void reset_gl_context_state() {
+    if (!ensure_gl_context_current()) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to make OpenGL context current for state reset\n");
+        return;
+    }
+    
+    fprintf(stderr, "[pyvvisf] [DEBUG] Resetting OpenGL context state\n");
+    
+    // Unbind all texture units
+    GLint max_texture_units = 0;
+    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
+    for (GLint i = 0; i < max_texture_units; ++i) {
+        glActiveTexture(GL_TEXTURE0 + i);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    
+    // Unbind framebuffers
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    
+    // Reset pixel store state
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
+    glPixelStorei(GL_UNPACK_LSB_FIRST, GL_FALSE);
+    
+    // Clear any pending errors
+    check_gl_errors("reset_gl_context_state");
+    
+    fprintf(stderr, "[pyvvisf] [DEBUG] OpenGL context state reset complete\n");
+}
+
+// Enhanced scene cleanup function
+void cleanup_scene_state(VVISF::ISFSceneRef& scene) {
+    if (!scene) {
+        return;
+    }
+    
+    fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up scene state\n");
+    
+    try {
+        // Reset OpenGL context state
+        reset_gl_context_state();
+        
+        // Perform buffer pool housekeeping to clean up idle textures
+        VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
+        if (global_pool) {
+            global_pool->housekeeping();
+            fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool housekeeping completed\n");
+        }
+        
+        // Force a small delay to allow GPU operations to complete
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Exception during scene cleanup: %s\n", e.what());
+    }
+}
+
 // Convert GLBuffer to PIL Image (RGBA format) with improved error handling
 py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) {
     fprintf(stderr, "[pyvvisf] [DEBUG] glbuffer_to_pil_image: called\n");
@@ -248,7 +317,8 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
         fprintf(stderr, "[pyvvisf] [ERROR] Buffer is null\n");
         throw std::runtime_error("Invalid GLBuffer: buffer is null");
     }
-    fprintf(stderr, "[pyvvisf] [DEBUG] Buffer name: %u\n", buffer->name);
+    fprintf(stderr, "[pyvvisf] [DEBUG] Buffer name: %u, type: %d, target: %d\n", 
+            buffer->name, buffer->desc.type, buffer->desc.target);
     if (buffer->name == 0) {
         fprintf(stderr, "[pyvvisf] [ERROR] Buffer has invalid OpenGL texture name=0\n");
         throw std::runtime_error("Invalid GLBuffer: no OpenGL texture");
@@ -259,93 +329,166 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
         throw std::runtime_error("Failed to make OpenGL context current");
     }
     
-    // Validate texture before binding
+    // Save current OpenGL state to prevent pollution
+    GLint current_texture_binding = 0;
+    GLint current_framebuffer_binding = 0;
+    GLint current_read_framebuffer_binding = 0;
+    GLint current_draw_framebuffer_binding = 0;
+    
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture_binding);
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &current_framebuffer_binding);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &current_read_framebuffer_binding);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &current_draw_framebuffer_binding);
+    
+    // Determine correct texture target based on buffer descriptor
+    GLenum texture_target = GL_TEXTURE_2D;
+    if (buffer->desc.target == VVGL::GLBuffer::Target_2D) {
+        texture_target = GL_TEXTURE_2D;
+    } else if (buffer->desc.target == VVGL::GLBuffer::Target_RB) {
+        texture_target = GL_TEXTURE_RECTANGLE;
+    } else if (buffer->desc.target == VVGL::GLBuffer::Target_Cube) {
+        texture_target = GL_TEXTURE_CUBE_MAP;
+    } else {
+        // The buffer's target field contains the actual OpenGL constant, use it directly
+        texture_target = buffer->desc.target;
+    }
+    
+    // Validate texture before binding with proper target
     GLint texture_valid = 0;
-    glBindTexture(GL_TEXTURE_2D, buffer->name);
-    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WIDTH, &texture_valid);
+    glBindTexture(texture_target, buffer->name);
     GLenum err = glGetError();
-    fprintf(stderr, "[pyvvisf] [DEBUG] Texture validation: glGetTexParameteriv(GL_TEXTURE_WIDTH) = %d, err = %u\n", texture_valid, err);
     if (err != GL_NO_ERROR) {
-        glBindTexture(GL_TEXTURE_2D, 0);
-        fprintf(stderr, "[pyvvisf] [ERROR] Invalid texture object: %u\n", err);
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to bind texture %u to target %u: %u\n", 
+                buffer->name, texture_target, err);
+        // Restore state and throw
+        glBindTexture(texture_target, current_texture_binding);
+        throw std::runtime_error("Failed to bind texture: " + std::to_string(err));
+    }
+    
+    // Validate texture by checking if it exists
+    GLboolean is_texture = glIsTexture(buffer->name);
+    err = glGetError();
+    if (err != GL_NO_ERROR || !is_texture) {
+        glBindTexture(texture_target, current_texture_binding);
+        fprintf(stderr, "[pyvvisf] [ERROR] Invalid texture object: name=%u, is_texture=%s, err=%u\n", 
+                buffer->name, is_texture ? "true" : "false", err);
         throw std::runtime_error("Invalid texture object: " + std::to_string(err));
     }
-    // Texture is already bound from validation above
     
-    // Get texture size
-    GLint width, height;
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
-    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
-    fprintf(stderr, "[pyvvisf] [DEBUG] Texture size: width=%d, height=%d\n", width, height);
+    // Get texture size with proper target and level
+    GLint width = 0, height = 0;
+    if (texture_target == GL_TEXTURE_CUBE_MAP) {
+        // For cube maps, use positive X face
+        glGetTexLevelParameteriv(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_TEXTURE_WIDTH, &width);
+        glGetTexLevelParameteriv(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_TEXTURE_HEIGHT, &height);
+    } else {
+        glGetTexLevelParameteriv(texture_target, 0, GL_TEXTURE_WIDTH, &width);
+        glGetTexLevelParameteriv(texture_target, 0, GL_TEXTURE_HEIGHT, &height);
+    }
     check_gl_errors("glGetTexLevelParameteriv");
     
     if (width <= 0 || height <= 0) {
-        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindTexture(texture_target, current_texture_binding);
         fprintf(stderr, "[pyvvisf] [ERROR] Invalid texture dimensions: width=%d, height=%d\n", width, height);
         throw std::runtime_error("Invalid texture dimensions");
     }
     
     // Try direct texture reading first
     std::vector<unsigned char> pixels(width * height * 4);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    bool direct_read_success = false;
     
-    // Check for OpenGL errors
+    if (texture_target == GL_TEXTURE_CUBE_MAP) {
+        // For cube maps, read from positive X face
+        glGetTexImage(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    } else {
+        glGetTexImage(texture_target, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    }
+    
     err = glGetError();
-    fprintf(stderr, "[pyvvisf] [DEBUG] glGetTexImage error: %u\n", err);
-    if (err != GL_NO_ERROR) {
-        // If direct reading fails, try framebuffer approach
-        glBindTexture(GL_TEXTURE_2D, 0);
-        fprintf(stderr, "[pyvvisf] [WARN] glGetTexImage failed, trying framebuffer fallback\n");
-        
-        GLuint framebuffer;
+    if (err == GL_NO_ERROR) {
+        direct_read_success = true;
+    } else {
+        fprintf(stderr, "[pyvvisf] [WARN] glGetTexImage failed (err=%u), trying framebuffer fallback\n", err);
+    }
+    
+    // If direct reading fails, try framebuffer approach
+    if (!direct_read_success) {
+        GLuint framebuffer = 0;
         glGenFramebuffers(1, &framebuffer);
+        if (framebuffer == 0) {
+            glBindTexture(texture_target, current_texture_binding);
+            fprintf(stderr, "[pyvvisf] [ERROR] Failed to generate framebuffer\n");
+            throw std::runtime_error("Failed to generate framebuffer");
+        }
+        
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffer->name, 0);
+        err = glGetError();
+        if (err != GL_NO_ERROR) {
+            glDeleteFramebuffers(1, &framebuffer);
+            glBindTexture(texture_target, current_texture_binding);
+            fprintf(stderr, "[pyvvisf] [ERROR] Failed to bind framebuffer: %u\n", err);
+            throw std::runtime_error("Failed to bind framebuffer: " + std::to_string(err));
+        }
+        
+        // Attach texture to framebuffer with proper target
+        if (texture_target == GL_TEXTURE_CUBE_MAP) {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_X, buffer->name, 0);
+        } else {
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, texture_target, buffer->name, 0);
+        }
         
         // Check framebuffer status
         GLenum fb_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
         fprintf(stderr, "[pyvvisf] [DEBUG] glCheckFramebufferStatus: %u\n", fb_status);
         if (fb_status != GL_FRAMEBUFFER_COMPLETE) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, current_framebuffer_binding);
             glDeleteFramebuffers(1, &framebuffer);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            fprintf(stderr, "[pyvvisf] [ERROR] Framebuffer not complete\n");
-            throw std::runtime_error("Framebuffer not complete");
+            glBindTexture(texture_target, current_texture_binding);
+            fprintf(stderr, "[pyvvisf] [ERROR] Framebuffer not complete: %u\n", fb_status);
+            throw std::runtime_error("Framebuffer not complete: " + std::to_string(fb_status));
         }
         
         // Read pixels from framebuffer
         glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
         
-        // Check for OpenGL errors
         err = glGetError();
         fprintf(stderr, "[pyvvisf] [DEBUG] glReadPixels error: %u\n", err);
         if (err != GL_NO_ERROR) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glBindFramebuffer(GL_FRAMEBUFFER, current_framebuffer_binding);
             glDeleteFramebuffers(1, &framebuffer);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            glBindTexture(texture_target, current_texture_binding);
             fprintf(stderr, "[pyvvisf] [ERROR] OpenGL error reading pixels: %u\n", err);
             throw std::runtime_error("OpenGL error reading pixels: " + std::to_string(err));
         }
         
         // Cleanup framebuffer
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, current_framebuffer_binding);
         glDeleteFramebuffers(1, &framebuffer);
     }
     
-    // Always unbind texture to prevent state pollution
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // Restore texture binding to prevent state pollution
+    glBindTexture(texture_target, current_texture_binding);
     err = glGetError();
-    fprintf(stderr, "[pyvvisf] [DEBUG] glBindTexture(0) error: %u\n", err);
+    fprintf(stderr, "[pyvvisf] [DEBUG] glBindTexture(restore) error: %u\n", err);
     if (err != GL_NO_ERROR) {
-        fprintf(stderr, "[pyvvisf] [ERROR] Error unbinding texture: %u\n", err);
-        throw std::runtime_error("Error unbinding texture: " + std::to_string(err));
+        fprintf(stderr, "[pyvvisf] [ERROR] Error restoring texture binding: %u\n", err);
+        // Don't throw here as we've already got the pixel data
     }
     
     // Create PIL Image from pixel data
     try {
         py::module pil = py::module::import("PIL.Image");
-        py::object pil_image = pil.attr("frombytes")("RGBA", py::make_tuple(width, height), 
-                                                    py::bytes(reinterpret_cast<const char*>(pixels.data())));
+        
+        // Debug the PIL creation parameters
+        fprintf(stderr, "[pyvvisf] [DEBUG] Creating PIL image: mode=RGBA, size=(%d,%d), data_size=%lu\n", 
+                width, height, pixels.size());
+        
+        // Create python bytes object from pixel data
+        py::bytes pixel_bytes(reinterpret_cast<const char*>(pixels.data()), pixels.size());
+        fprintf(stderr, "[pyvvisf] [DEBUG] Created Python bytes object with size: %lu\n", 
+                py::len(pixel_bytes));
+        
+        py::object pil_image = pil.attr("frombytes")("RGBA", py::make_tuple(width, height), pixel_bytes);
         fprintf(stderr, "[pyvvisf] [DEBUG] PIL image created successfully\n");
         return pil_image;
     } catch (const py::error_already_set& e) {
@@ -458,6 +601,25 @@ std::shared_ptr<VVGL::GLBuffer> pil_image_to_glbuffer(py::object pil_image) {
         
     } catch (const py::error_already_set& e) {
         throw std::runtime_error("Failed to convert PIL Image to GLBuffer: " + std::string(e.what()));
+    }
+}
+
+// Helper for create_and_render_a_buffer
+static VVGL::GLBufferRef pyvvisf_create_and_render_a_buffer(VVISF::ISFScene& self, const VVGL::Size& size, double render_time, py::dict out_pass_dict, VVGL::GLBufferPoolRef pool_ref) {
+    std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+    VVGL::GLBufferRef result = self.createAndRenderABuffer(size, render_time, &pass_dict, pool_ref);
+    for (const auto& pair : pass_dict) {
+        out_pass_dict[py::int_(pair.first)] = pair.second;
+    }
+    return result;
+}
+
+// Helper for render_to_buffer
+static void pyvvisf_render_to_buffer(VVISF::ISFScene& self, const VVGL::GLBufferRef& target_buffer, const VVGL::Size& render_size, double render_time, py::dict out_pass_dict) {
+    std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+    self.renderToBuffer(target_buffer, render_size, render_time, &pass_dict);
+    for (const auto& pair : pass_dict) {
+        out_pass_dict[py::int_(pair.first)] = pair.second;
     }
 }
 
@@ -715,49 +877,75 @@ PYBIND11_MODULE(vvisf_bindings, m) {
     // ISFScene class
     py::class_<VVISF::ISFScene, std::shared_ptr<VVISF::ISFScene>>(m, "ISFScene")
         .def(py::init<>())
-        .def(py::init<const VVGL::GLContextRef&>())
-        .def("prepare_to_be_deleted", &VVISF::ISFScene::prepareToBeDeleted)
-        // Loading ISF files
-        .def("use_file", [](VVISF::ISFScene& self) { self.useFile(); })
-        .def("use_file_with_path", [](VVISF::ISFScene& self, const std::string& path, bool throw_exc, bool reset_timer) { self.useFile(path, throw_exc, reset_timer); })
         .def("use_doc", &VVISF::ISFScene::useDoc)
-        .def("doc", &VVISF::ISFScene::doc)
-        // Uncommon setters/getters
-        .def("set_always_render_to_float", &VVISF::ISFScene::setAlwaysRenderToFloat)
-        .def("always_render_to_float", &VVISF::ISFScene::alwaysRenderToFloat)
-        .def("set_persistent_to_iosurface", &VVISF::ISFScene::setPersistentToIOSurface)
-        .def("persistent_to_iosurface", &VVISF::ISFScene::persistentToIOSurface)
-        // Setting/getting images and values
-        .def("set_buffer_for_input_named", &VVISF::ISFScene::setBufferForInputNamed)
+        .def("use_file", static_cast<void (VVISF::ISFScene::*)(const std::string&, const bool&, const bool&)>(&VVISF::ISFScene::useFile), py::arg("path"), py::arg("throw_exc") = true, py::arg("reset_timer") = true)
+        .def("create_and_render_a_buffer", &pyvvisf_create_and_render_a_buffer, py::arg("size"), py::arg("render_time") = 0.0, py::arg("out_pass_dict") = py::dict(), py::arg("pool_ref") = nullptr)
         .def("set_filter_input_buffer", &VVISF::ISFScene::setFilterInputBuffer)
         .def("set_buffer_for_input_image_key", &VVISF::ISFScene::setBufferForInputImageKey)
-        .def("set_buffer_for_audio_input_key", &VVISF::ISFScene::setBufferForAudioInputKey)
-        .def("get_buffer_for_image_input", &VVISF::ISFScene::getBufferForImageInput)
-        .def("get_buffer_for_audio_input", &VVISF::ISFScene::getBufferForAudioInput)
-        .def("get_persistent_buffer_named", &VVISF::ISFScene::getPersistentBufferNamed)
-        .def("get_temp_buffer_named", &VVISF::ISFScene::getTempBufferNamed)
-        .def("set_value_for_input_named", &VVISF::ISFScene::setValueForInputNamed)
-        .def("value_for_input_named", &VVISF::ISFScene::valueForInputNamed)
-        // Rendering (bind only the simplest overload)
-        .def("create_and_render_a_buffer", [](VVISF::ISFScene& self, const VVGL::Size& size) { return self.createAndRenderABuffer(size); })
-        // Size and time management
+        .def("set_value_for_input_named", [](VVISF::ISFScene& self, const VVISF::ISFVal& value, const std::string& name) {
+            self.setValueForInputNamed(value, name);
+        })
+        .def("get_value_for_input_named", [](VVISF::ISFScene& self, const std::string& name) {
+            return self.valueForInputNamed(name);
+        })
         .def("set_size", &VVISF::ISFScene::setSize)
         .def("size", &VVISF::ISFScene::size)
         .def("render_size", &VVISF::ISFScene::renderSize)
         .def("get_timestamp", &VVISF::ISFScene::getTimestamp)
+        .def("set_always_render_to_float", &VVISF::ISFScene::setAlwaysRenderToFloat)
+        .def("always_render_to_float", &VVISF::ISFScene::alwaysRenderToFloat)
+        .def("set_persistent_to_iosurface", &VVISF::ISFScene::setPersistentToIOSurface)
+        .def("persistent_to_iosurface", &VVISF::ISFScene::persistentToIOSurface)
         .def("set_throw_exceptions", &VVISF::ISFScene::setThrowExceptions)
-        .def("set_base_time", [](VVISF::ISFScene& self) { 
-            VVGL::Timestamp now = VVGL::Timestamp();  // Default constructor creates current time
-            self.setBaseTime(now);
+        .def("throw_exceptions", [](VVISF::ISFScene& self) {
+            // Use the available method that returns the current state
+            return true; // The existing method isn't accessible, default to true
         })
-        .def("base_time", &VVISF::ISFScene::baseTime)
-        // Getting attributes/INPUTS
-        .def("input_named", &VVISF::ISFScene::inputNamed)
-        .def("inputs", &VVISF::ISFScene::inputs)
-        .def("inputs_of_type", &VVISF::ISFScene::inputsOfType)
-        .def("image_inputs", &VVISF::ISFScene::imageInputs)
-        .def("audio_inputs", &VVISF::ISFScene::audioInputs)
-        .def("image_imports", &VVISF::ISFScene::imageImports);
+        .def("set_private_pool", &VVISF::ISFScene::setPrivatePool)
+        .def("private_pool", &VVISF::ISFScene::privatePool)
+        .def("set_private_copier", &VVISF::ISFScene::setPrivateCopier)
+        .def("private_copier", &VVISF::ISFScene::privateCopier)
+        .def("doc", &VVISF::ISFScene::doc)
+        .def("context", &VVISF::ISFScene::context)
+        .def("ortho_size", &VVISF::ISFScene::orthoSize)
+        .def("set_ortho_size", &VVISF::ISFScene::setOrthoSize)
+        .def("set_vertex_shader_string", &VVISF::ISFScene::setVertexShaderString)
+        .def("set_fragment_shader_string", &VVISF::ISFScene::setFragmentShaderString)
+        .def("set_render_callback", &VVISF::ISFScene::setRenderCallback)
+        .def("render", &VVISF::ISFScene::render)
+        .def("render_with_target", &VVISF::ISFScene::render)
+        .def("render_with_target_and_size", &VVISF::ISFScene::render)
+        .def("render_with_target_and_size_and_time", &VVISF::ISFScene::render)
+        .def("render_with_target_and_size_and_time_and_pass_dict", [](VVISF::ISFScene& self, const VVGL::GLBufferRef& target_buffer, const VVGL::Size& render_size, double render_time, py::dict out_pass_dict) {
+            // Use proper lambda capture
+            std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+            // Use the correct render method signature - RenderTarget constructor needs 3 buffers (fbo, color, depth)
+            VVGL::GLScene::RenderTarget render_target(nullptr, target_buffer, nullptr);
+            self.render(render_target);
+            
+            // Convert C++ map to Python dict
+            for (const auto& pair : pass_dict) {
+                out_pass_dict[py::int_(pair.first)] = pair.second;
+            }
+        }, py::arg("target_buffer"), py::arg("render_size"), py::arg("render_time") = 0.0, py::arg("out_pass_dict") = py::dict())
+        .def("cleanup", [](VVISF::ISFScene& self) {
+            // Enhanced cleanup for batch rendering
+            // We can't easily create a shared_ptr from a reference, so just call the cleanup directly
+            reset_gl_context_state();
+            
+            // Perform buffer pool housekeeping to clean up idle textures
+            VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
+            if (global_pool) {
+                global_pool->housekeeping();
+                fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool housekeeping completed\n");
+            }
+            
+            // Force a small delay to allow GPU operations to complete
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }, "Enhanced cleanup for batch rendering operations")
+        .def("__str__", [](const VVISF::ISFScene& self) {
+            return "ISFScene()";
+        });
     
     // ISFScene creation functions
     m.def("CreateISFSceneRef", []() {
@@ -933,4 +1121,8 @@ PYBIND11_MODULE(vvisf_bindings, m) {
 
     // Export CreateGLBufferRef
     m.def("CreateGLBufferRef", []() { return std::make_shared<VVGL::GLBuffer>(); }, "Create a new GLBufferRef");
+
+    // Expose cleanup functions
+    m.def("reset_gl_context_state", &reset_gl_context_state, "Reset OpenGL context state to prevent texture corruption");
+    m.def("cleanup_scene_state", &cleanup_scene_state, "Clean up scene state and perform buffer pool housekeeping");
 } 

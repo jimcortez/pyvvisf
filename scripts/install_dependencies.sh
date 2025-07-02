@@ -40,7 +40,10 @@ if [[ "$PLATFORM" == "linux" ]]; then
             libglew-dev \
             pkg-config \
             python3-dev \
-            python3-pip
+            python3-pip \
+            xvfb \
+            x11-utils \
+            mesa-utils
         
         # Architecture-specific dependencies
         if [[ "$ARCH" == "aarch64" ]]; then
@@ -48,6 +51,21 @@ if [[ "$PLATFORM" == "linux" ]]; then
             apt-get install -y \
                 gcc-aarch64-linux-gnu \
                 g++-aarch64-linux-gnu
+        fi
+        
+        # Set up headless display for GLFW
+        echo "Setting up headless display for GLFW..."
+        if command -v Xvfb &> /dev/null; then
+            # Start Xvfb if not already running
+            if ! pgrep -x "Xvfb" > /dev/null; then
+                echo "Starting Xvfb on display :99..."
+                Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+                sleep 2
+            fi
+            export DISPLAY=:99
+            echo "Display set to: $DISPLAY"
+        else
+            echo "Warning: Xvfb not available, GLFW may not work properly"
         fi
         
     elif command -v yum &> /dev/null; then
@@ -70,6 +88,36 @@ if [[ "$PLATFORM" == "linux" ]]; then
             yum install -y \
                 gcc-aarch64-linux-gnu \
                 gcc-c++-aarch64-linux-gnu
+        fi
+        
+        # Set up headless display for GLFW
+        echo "Setting up headless display for GLFW..."
+        if command -v Xvfb &> /dev/null; then
+            # Start Xvfb if not already running
+            if ! pgrep -x "Xvfb" > /dev/null; then
+                echo "Starting Xvfb on display :99..."
+                Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+                sleep 2
+            fi
+            export DISPLAY=:99
+            echo "Display set to: $DISPLAY"
+        else
+            echo "Warning: Xvfb not available, GLFW may not work properly"
+        fi
+        
+        # Set up headless display for GLFW
+        echo "Setting up headless display for GLFW..."
+        if command -v Xvfb &> /dev/null; then
+            # Start Xvfb if not already running
+            if ! pgrep -x "Xvfb" > /dev/null; then
+                echo "Starting Xvfb on display :99..."
+                Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /dev/null 2>&1 &
+                sleep 2
+            fi
+            export DISPLAY=:99
+            echo "Display set to: $DISPLAY"
+        else
+            echo "Warning: Xvfb not available, GLFW may not work properly"
         fi
     else
         echo "Unsupported package manager. Please install manually:"
