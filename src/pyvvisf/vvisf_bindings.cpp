@@ -243,39 +243,59 @@ void check_gl_errors(const std::string& operation) {
 
 // Convert GLBuffer to PIL Image (RGBA format) with improved error handling
 py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) {
-    if (!buffer || buffer->name == 0) {
+    fprintf(stderr, "[pyvvisf] [DEBUG] glbuffer_to_pil_image: called\n");
+    if (!buffer) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Buffer is null\n");
+        throw std::runtime_error("Invalid GLBuffer: buffer is null");
+    }
+    fprintf(stderr, "[pyvvisf] [DEBUG] Buffer name: %u\n", buffer->name);
+    if (buffer->name == 0) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Buffer has invalid OpenGL texture name=0\n");
         throw std::runtime_error("Invalid GLBuffer: no OpenGL texture");
     }
     
     if (!ensure_gl_context_current()) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to make OpenGL context current\n");
         throw std::runtime_error("Failed to make OpenGL context current");
     }
     
-    // Bind the texture
+    // Validate texture before binding
+    GLint texture_valid = 0;
     glBindTexture(GL_TEXTURE_2D, buffer->name);
-    check_gl_errors("glBindTexture");
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WIDTH, &texture_valid);
+    GLenum err = glGetError();
+    fprintf(stderr, "[pyvvisf] [DEBUG] Texture validation: glGetTexParameteriv(GL_TEXTURE_WIDTH) = %d, err = %u\n", texture_valid, err);
+    if (err != GL_NO_ERROR) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        fprintf(stderr, "[pyvvisf] [ERROR] Invalid texture object: %u\n", err);
+        throw std::runtime_error("Invalid texture object: " + std::to_string(err));
+    }
+    // Texture is already bound from validation above
     
     // Get texture size
     GLint width, height;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    fprintf(stderr, "[pyvvisf] [DEBUG] Texture size: width=%d, height=%d\n", width, height);
     check_gl_errors("glGetTexLevelParameteriv");
     
     if (width <= 0 || height <= 0) {
         glBindTexture(GL_TEXTURE_2D, 0);
+        fprintf(stderr, "[pyvvisf] [ERROR] Invalid texture dimensions: width=%d, height=%d\n", width, height);
         throw std::runtime_error("Invalid texture dimensions");
     }
     
     // Try direct texture reading first
     std::vector<unsigned char> pixels(width * height * 4);
-    glBindTexture(GL_TEXTURE_2D, buffer->name);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     
     // Check for OpenGL errors
-    GLenum err = glGetError();
+    err = glGetError();
+    fprintf(stderr, "[pyvvisf] [DEBUG] glGetTexImage error: %u\n", err);
     if (err != GL_NO_ERROR) {
         // If direct reading fails, try framebuffer approach
         glBindTexture(GL_TEXTURE_2D, 0);
+        fprintf(stderr, "[pyvvisf] [WARN] glGetTexImage failed, trying framebuffer fallback\n");
         
         GLuint framebuffer;
         glGenFramebuffers(1, &framebuffer);
@@ -283,10 +303,13 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, buffer->name, 0);
         
         // Check framebuffer status
-        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        GLenum fb_status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        fprintf(stderr, "[pyvvisf] [DEBUG] glCheckFramebufferStatus: %u\n", fb_status);
+        if (fb_status != GL_FRAMEBUFFER_COMPLETE) {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glDeleteFramebuffers(1, &framebuffer);
             glBindTexture(GL_TEXTURE_2D, 0);
+            fprintf(stderr, "[pyvvisf] [ERROR] Framebuffer not complete\n");
             throw std::runtime_error("Framebuffer not complete");
         }
         
@@ -295,10 +318,12 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
         
         // Check for OpenGL errors
         err = glGetError();
+        fprintf(stderr, "[pyvvisf] [DEBUG] glReadPixels error: %u\n", err);
         if (err != GL_NO_ERROR) {
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             glDeleteFramebuffers(1, &framebuffer);
             glBindTexture(GL_TEXTURE_2D, 0);
+            fprintf(stderr, "[pyvvisf] [ERROR] OpenGL error reading pixels: %u\n", err);
             throw std::runtime_error("OpenGL error reading pixels: " + std::to_string(err));
         }
         
@@ -307,16 +332,24 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
         glDeleteFramebuffers(1, &framebuffer);
     }
     
+    // Always unbind texture to prevent state pollution
     glBindTexture(GL_TEXTURE_2D, 0);
+    err = glGetError();
+    fprintf(stderr, "[pyvvisf] [DEBUG] glBindTexture(0) error: %u\n", err);
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Error unbinding texture: %u\n", err);
+        throw std::runtime_error("Error unbinding texture: " + std::to_string(err));
+    }
     
     // Create PIL Image from pixel data
-    // Note: This requires PIL to be available at runtime
     try {
         py::module pil = py::module::import("PIL.Image");
         py::object pil_image = pil.attr("frombytes")("RGBA", py::make_tuple(width, height), 
                                                     py::bytes(reinterpret_cast<const char*>(pixels.data())));
+        fprintf(stderr, "[pyvvisf] [DEBUG] PIL image created successfully\n");
         return pil_image;
     } catch (const py::error_already_set& e) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to create PIL Image: %s\n", e.what());
         throw std::runtime_error("Failed to create PIL Image: " + std::string(e.what()));
     }
 }
@@ -838,7 +871,29 @@ PYBIND11_MODULE(vvisf_bindings, m) {
             desc.pixelType = static_cast<GLBuffer::PixelType>(PT_UByte);
             // Pass true to createInCurrentContext to use the GLFW context
             return self->createBufferRef(desc, size, nullptr, VVGL::Size(), true);
-        }, py::arg("size"));
+        }, py::arg("size"))
+        .def("cleanup", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
+            // Ensure GLFW context is current before cleanup
+            if (!ensure_gl_context_current()) {
+                throw std::runtime_error("Failed to make OpenGL context current");
+            }
+            // Call housekeeping to clean up idle buffers
+            self->housekeeping();
+            // Call purge to remove all free buffers
+            self->purge();
+        }, "Clean up the buffer pool by removing idle and free buffers")
+        .def("housekeeping", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
+            if (!ensure_gl_context_current()) {
+                throw std::runtime_error("Failed to make OpenGL context current");
+            }
+            self->housekeeping();
+        }, "Perform housekeeping to clean up idle buffers")
+        .def("purge", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
+            if (!ensure_gl_context_current()) {
+                throw std::runtime_error("Failed to make OpenGL context current");
+            }
+            self->purge();
+        }, "Purge all free buffers from the pool");
 
     // Note: All buffer/image operations require the OpenGL context to be current (GLFW context). Provide helpers in Python for context management.
     

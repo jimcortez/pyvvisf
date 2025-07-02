@@ -1,0 +1,53 @@
+--- a/external/VVISF-GL/VVGL/src/GLContext_GLFW.txt
++++ b/external/VVISF-GL/VVGL/src/GLContext_GLFW.txt
+@@ -42,7 +42,7 @@ GLContext::~GLContext()	{
+ /*
+ GLContext * GLContext::allocNewContextSharingMe() const	{
+ 	return new GLContext(win);
+-}
++} 
+ GLContext GLContext::newContextSharingMe() const	{
+ 	return GLContext(win);
+ }
+@@ -50,7 +50,7 @@ GLContext GLContext::newContextSharingMe() const	{
+ GLContextRef GLContext::newContextSharingMe() const	{
+ 	return make_shared<GLContext>(win);
+ }
+-
++*/
+ /*	========================================	*/
+ #pragma mark --------------------- general init/delete
+ 
+@@ -58,6 +58,10 @@ void GLContext::generalInit()	{
+ 	if (win != nullptr)	{
+ 	}
+ 	
++	// For GLFW, we need to ensure the window is valid before proceeding
++	if (win == nullptr) {
++		return; // Don't try to calculate version with null window
++	}
+ 	//	figure out what version of GL we're working with
+ 	calculateVersion();
+ }
+@@ -67,6 +71,10 @@ void GLContext::makeCurrent()	{
+ 	//cout << __PRETTY_FUNCTION__ << ", ctx is " << ctx << endl;
+ 	if (win != nullptr)	{
+ 		glfwMakeContextCurrent(win);
++		// Check for GLFW errors
++		if (glfwGetError(nullptr) != GLFW_NO_ERROR) {
++			return; // Don't proceed if GLFW error occurred
++		}
+ 		if (!initializedFuncs)	{
+ 			glewInit();
+ 			initializedFuncs = true;
+@@ -76,6 +84,10 @@ void GLContext::makeCurrentIfNotCurrent()	{
+ 	//cout << __PRETTY_FUNCTION__ << ", ctx is " << ctx << endl;
+ 	GLFWwindow		*currentCtx = glfwGetCurrentContext();
+ 	if (currentCtx != win)	{
++		// Check if win is valid before using it
++		if (win == nullptr) {
++			return; // Don't crash with null window
++		}
+ 		glfwMakeContextCurrent(win);
+ 		if (!initializedFuncs)	{
+ 			glewInit();
