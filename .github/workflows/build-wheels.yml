@@ -237,6 +237,7 @@ jobs:
     name: Upload to PyPI
     needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
+    environment: deployment
     if: github.event_name == 'release'
     steps:
     - name: Download all artifacts
