@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 #include <chrono>
+#include <atomic>
 
 // VVISF includes
 #include "VVISF.hpp"
@@ -79,51 +80,136 @@ std::string isf_file_type_to_string(VVISF::ISFFileType type) {
     return VVISF::ISFFileTypeString(type);
 }
 
-// Global GLFW window for OpenGL context with thread safety
+// Global GLFW window for OpenGL context with enhanced thread safety
 static GLFWwindow* g_glfw_window = nullptr;
 static bool g_glfw_initialized = false;
-static std::mutex g_glfw_mutex;
+static std::recursive_mutex g_glfw_mutex;  // Use recursive_mutex for same-thread re-entry
+static std::atomic<bool> g_context_valid{false};
+static GLuint g_debug_texture = 0;  // Debug texture to verify context validity
 
-// Helper to get OpenGL version string
+// Thread-local storage for context validation
+thread_local bool tl_context_validated = false;
+
+// Enhanced OpenGL error checking with context validation
+void check_gl_errors_enhanced(const std::string& operation) {
+    if (!g_context_valid.load()) {
+        fprintf(stderr, "[pyvvisf] [ERROR] OpenGL context not valid during %s\n", operation.c_str());
+        return;
+    }
+    
+    GLenum err;
+    bool has_errors = false;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        has_errors = true;
+        fprintf(stderr, "[pyvvisf] [ERROR] OpenGL error during %s: 0x%04X (%d)\n", operation.c_str(), err, err);
+    }
+    
+    if (has_errors) {
+        // Force context validation on next operation
+        tl_context_validated = false;
+    }
+}
+
+// Validate OpenGL context state
+bool validate_gl_context() {
+    if (!g_glfw_window || !g_context_valid.load()) {
+        return false;
+    }
+    
+    if (tl_context_validated) {
+        return true;
+    }
+    
+    // Check if context is current
+    if (glfwGetCurrentContext() != g_glfw_window) {
+        glfwMakeContextCurrent(g_glfw_window);
+        GLenum err = glGetError();
+        if (err != GL_NO_ERROR) {
+            fprintf(stderr, "[pyvvisf] [ERROR] Failed to make context current: 0x%04X\n", err);
+            return false;
+        }
+    }
+    
+    // Validate with a simple OpenGL call
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Context validation failed: 0x%04X\n", err);
+        g_context_valid.store(false);
+        return false;
+    }
+    
+    tl_context_validated = true;
+    return true;
+}
+
+// Helper to get OpenGL version string with validation
 std::string get_opengl_version() {
+    if (!validate_gl_context()) {
+        return "(context invalid)";
+    }
+    
     const GLubyte* ver = glGetString(GL_VERSION);
     if (ver) return std::string(reinterpret_cast<const char*>(ver));
     return "(null)";
 }
 
-// Initialize GLFW and OpenGL context with improved error handling
+// Enhanced GLFW context initialization with comprehensive error handling
 bool initialize_glfw_context() {
-    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
     
-    if (g_glfw_initialized && g_glfw_window) {
-        glfwMakeContextCurrent(g_glfw_window);
-        return true;
+    fprintf(stderr, "[pyvvisf] [DEBUG] Initializing GLFW context...\n");
+    
+    // If already initialized and valid, just ensure it's current
+    if (g_glfw_initialized && g_glfw_window && g_context_valid.load()) {
+        if (validate_gl_context()) {
+            fprintf(stderr, "[pyvvisf] [DEBUG] Using existing valid GLFW context\n");
+            return true;
+        }
+        fprintf(stderr, "[pyvvisf] [WARN] Existing context invalid, reinitializing...\n");
     }
     
-    // Clean up any existing window
+    // Clean up any existing invalid context
     if (g_glfw_window) {
+        fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up existing GLFW window\n");
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
     }
-    g_glfw_initialized = false;
     
-    // Initialize GLFW
+    // Reset state
+    g_glfw_initialized = false;
+    g_context_valid.store(false);
+    tl_context_validated = false;
+    
+    // Initialize GLFW if needed
     if (!glfwInit()) {
-        fprintf(stderr, "[VVISF] Failed to initialize GLFW\n");
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to initialize GLFW\n");
         return false;
     }
     
-    // Configure GLFW for OpenGL
+    // Configure GLFW for maximum compatibility
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // Hidden window
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);  // Required on macOS
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+    glfwWindowHint(GLFW_DOUBLEBUFFER, GLFW_FALSE);  // Offscreen rendering doesn't need double buffering
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     
-    // Create window
-    g_glfw_window = glfwCreateWindow(100, 100, "Offscreen", NULL, NULL);
+    // Additional hints for Apple Silicon compatibility
+    #ifdef __APPLE__
+    glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_FALSE);
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_FALSE);
+    #endif
+    
+    // Create window with error checking
+    g_glfw_window = glfwCreateWindow(100, 100, "pyvvisf-offscreen", NULL, NULL);
     if (!g_glfw_window) {
-        fprintf(stderr, "[VVISF] Failed to create GLFW window\n");
+        const char* error_desc;
+        int error_code = glfwGetError(&error_desc);
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to create GLFW window: %d - %s\n", error_code, error_desc);
         glfwTerminate();
         return false;
     }
@@ -131,87 +217,207 @@ bool initialize_glfw_context() {
     // Make context current
     glfwMakeContextCurrent(g_glfw_window);
     
-    // Initialize GLEW
+    // Initialize GLEW with enhanced error checking
     glewExperimental = GL_TRUE;
     GLenum glew_result = glewInit();
     if (glew_result != GLEW_OK) {
-        fprintf(stderr, "[VVISF] Failed to initialize GLEW: %s\n", glewGetErrorString(glew_result));
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to initialize GLEW: %s\n", glewGetErrorString(glew_result));
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
         glfwTerminate();
         return false;
     }
     
-    // Check for OpenGL errors after GLEW initialization
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        fprintf(stderr, "[VVISF] OpenGL error after GLEW init: %d\n", err);
-        // Don't fail here, as some drivers report errors during GLEW init
+    // Clear any GLEW initialization errors (common with glewExperimental)
+    while (glGetError() != GL_NO_ERROR) {
+        // Clear error queue
     }
     
-    g_glfw_initialized = true;
+    // Validate basic OpenGL functionality
+    GLint major, minor;
+    glGetIntegerv(GL_MAJOR_VERSION, &major);
+    glGetIntegerv(GL_MINOR_VERSION, &minor);
+    err = glGetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[pyvvisf] [ERROR] OpenGL context validation failed: 0x%04X\n", err);
+        glfwDestroyWindow(g_glfw_window);
+        g_glfw_window = nullptr;
+        glfwTerminate();
+        return false;
+    }
     
-    // Initialize VVISF global buffer pool
+    fprintf(stderr, "[pyvvisf] [INFO] OpenGL version: %d.%d\n", major, minor);
+    fprintf(stderr, "[pyvvisf] [INFO] OpenGL vendor: %s\n", glGetString(GL_VENDOR));
+    fprintf(stderr, "[pyvvisf] [INFO] OpenGL renderer: %s\n", glGetString(GL_RENDERER));
+    
+    // Create a debug texture to test context functionality
+    glGenTextures(1, &g_debug_texture);
+    if (g_debug_texture == 0) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to create debug texture\n");
+        glfwDestroyWindow(g_glfw_window);
+        g_glfw_window = nullptr;
+        glfwTerminate();
+        return false;
+    }
+    
+    // Test texture creation
+    glBindTexture(GL_TEXTURE_2D, g_debug_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    err = glGetError();
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Failed to create test texture: 0x%04X\n", err);
+        glDeleteTextures(1, &g_debug_texture);
+        g_debug_texture = 0;
+        glfwDestroyWindow(g_glfw_window);
+        g_glfw_window = nullptr;
+        glfwTerminate();
+        return false;
+    }
+    
+    // Mark context as valid
+    g_glfw_initialized = true;
+    g_context_valid.store(true);
+    tl_context_validated = true;
+    
+    // Initialize VVISF global buffer pool with enhanced error handling
     try {
         VVGL::GLContextRef gl_ctx = VVGL::CreateGLContextRefUsing(g_glfw_window);
         if (!gl_ctx) {
-            fprintf(stderr, "[VVISF] Failed to create VVGL::GLContextRefUsing\n");
-            glfwDestroyWindow(g_glfw_window);
-            g_glfw_window = nullptr;
-            glfwTerminate();
-            g_glfw_initialized = false;
-            return false;
+            throw std::runtime_error("Failed to create VVGL::GLContextRef");
         }
+        
+        // Test the context before creating buffer pool
+        gl_ctx->makeCurrentIfNotCurrent();
+        check_gl_errors_enhanced("VVGL context test");
+        
         VVGL::CreateGlobalBufferPool(gl_ctx);
+        fprintf(stderr, "[pyvvisf] [INFO] VVISF global buffer pool initialized successfully\n");
+        
     } catch (const std::exception& e) {
-        fprintf(stderr, "[VVISF] Exception during VVISF initialization: %s\n", e.what());
+        fprintf(stderr, "[pyvvisf] [ERROR] Exception during VVISF initialization: %s\n", e.what());
+        
+        // Cleanup on failure
+        if (g_debug_texture != 0) {
+            glDeleteTextures(1, &g_debug_texture);
+            g_debug_texture = 0;
+        }
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
         glfwTerminate();
         g_glfw_initialized = false;
+        g_context_valid.store(false);
         return false;
     }
     
+    fprintf(stderr, "[pyvvisf] [INFO] GLFW context initialization completed successfully\n");
     return true;
 }
 
-// Clean up GLFW context
+// Enhanced cleanup with proper ordering
 void cleanup_glfw_context() {
-    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
     
+    fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up GLFW context...\n");
+    
+    // Mark context as invalid immediately
+    g_context_valid.store(false);
+    tl_context_validated = false;
+    
+    // Clean up VVISF resources first (highest level)
+    try {
+        VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
+        if (global_pool) {
+            // Make context current for cleanup
+            if (g_glfw_window && glfwGetCurrentContext() != g_glfw_window) {
+                glfwMakeContextCurrent(g_glfw_window);
+            }
+            
+            // Clean up all buffers
+            global_pool->purge();
+            global_pool->housekeeping();
+            fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool cleaned up\n");
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[pyvvisf] [WARN] Exception during buffer pool cleanup: %s\n", e.what());
+    }
+    
+    // Clean up OpenGL resources
+    if (g_glfw_window) {
+        glfwMakeContextCurrent(g_glfw_window);
+        
+        if (g_debug_texture != 0) {
+            glDeleteTextures(1, &g_debug_texture);
+            g_debug_texture = 0;
+        }
+        
+        // Force GPU sync
+        glFinish();
+        check_gl_errors_enhanced("final cleanup");
+    }
+    
+    // Clean up GLFW resources (lowest level)
     if (g_glfw_window) {
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
+        fprintf(stderr, "[pyvvisf] [DEBUG] GLFW window destroyed\n");
     }
+    
+    // Note: Don't call glfwTerminate() here as it might be shared with other contexts
+    
     g_glfw_initialized = false;
+    fprintf(stderr, "[pyvvisf] [DEBUG] GLFW context cleanup completed\n");
 }
 
-// Expose a function to reinitialize the context
+// Safer context reinitialization
 bool reinitialize_glfw_context() {
+    fprintf(stderr, "[pyvvisf] [DEBUG] Reinitializing GLFW context...\n");
+    
     // Clean up existing context
     cleanup_glfw_context();
     
-    // Now initialize new context (this will acquire the lock internally)
+    // Small delay to ensure cleanup completion
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    
+    // Initialize new context
     return initialize_glfw_context();
 }
 
-// Expose a function to get OpenGL/GLFW/VVISF info
+// Enhanced context info with validation
 py::dict get_gl_info() {
-    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
     
     py::dict info;
     info["glfw_initialized"] = g_glfw_initialized;
+    info["context_valid"] = g_context_valid.load();
     info["window_ptr"] = reinterpret_cast<uintptr_t>(g_glfw_window);
+    info["debug_texture"] = g_debug_texture;
     
-    if (g_glfw_window) {
-        glfwMakeContextCurrent(g_glfw_window);
-        info["opengl_version"] = get_opengl_version();
-        
-        // Get additional OpenGL info
-        const GLubyte* vendor = glGetString(GL_VENDOR);
-        const GLubyte* renderer = glGetString(GL_RENDERER);
-        info["opengl_vendor"] = vendor ? std::string(reinterpret_cast<const char*>(vendor)) : "(null)";
-        info["opengl_renderer"] = renderer ? std::string(reinterpret_cast<const char*>(renderer)) : "(null)";
+    if (g_glfw_window && g_context_valid.load()) {
+        try {
+            if (validate_gl_context()) {
+                info["opengl_version"] = get_opengl_version();
+                
+                const GLubyte* vendor = glGetString(GL_VENDOR);
+                const GLubyte* renderer = glGetString(GL_RENDERER);
+                info["opengl_vendor"] = vendor ? std::string(reinterpret_cast<const char*>(vendor)) : "(null)";
+                info["opengl_renderer"] = renderer ? std::string(reinterpret_cast<const char*>(renderer)) : "(null)";
+                
+                GLint viewport[4];
+                glGetIntegerv(GL_VIEWPORT, viewport);
+                info["viewport_width"] = viewport[2];
+                info["viewport_height"] = viewport[3];
+            } else {
+                info["opengl_version"] = "(validation failed)";
+                info["opengl_vendor"] = "(validation failed)";
+                info["opengl_renderer"] = "(validation failed)";
+            }
+        } catch (const std::exception& e) {
+            info["opengl_version"] = std::string("(exception: ") + e.what() + ")";
+            info["opengl_vendor"] = "(exception)";
+            info["opengl_renderer"] = "(exception)";
+        }
     } else {
         info["opengl_version"] = py::none();
         info["opengl_vendor"] = py::none();
@@ -221,29 +427,21 @@ py::dict get_gl_info() {
     return info;
 }
 
-// Helper function to ensure OpenGL context is current
+// Enhanced context validation
 bool ensure_gl_context_current() {
     if (!initialize_glfw_context()) {
         return false;
     }
     
-    if (g_glfw_window) {
-        glfwMakeContextCurrent(g_glfw_window);
-        return true;
-    }
-    
-    return false;
+    return validate_gl_context();
 }
 
 // Safe OpenGL error checking
 void check_gl_errors(const std::string& operation) {
-    GLenum err;
-    while ((err = glGetError()) != GL_NO_ERROR) {
-        fprintf(stderr, "[VVISF] OpenGL error during %s: %d\n", operation.c_str(), err);
-    }
+    check_gl_errors_enhanced(operation);
 }
 
-// Critical function to reset OpenGL context state and perform cleanup
+// Enhanced context state reset with comprehensive cleanup
 void reset_gl_context_state() {
     if (!ensure_gl_context_current()) {
         fprintf(stderr, "[pyvvisf] [ERROR] Failed to make OpenGL context current for state reset\n");
@@ -252,33 +450,70 @@ void reset_gl_context_state() {
     
     fprintf(stderr, "[pyvvisf] [DEBUG] Resetting OpenGL context state\n");
     
-    // Unbind all texture units
-    GLint max_texture_units = 0;
-    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
-    for (GLint i = 0; i < max_texture_units; ++i) {
-        glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+    try {
+        // Save current program to restore later
+        GLint current_program = 0;
+        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
+        
+        // Unbind all texture units
+        GLint max_texture_units = 0;
+        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
+        for (GLint i = 0; i < max_texture_units; ++i) {
+            glActiveTexture(GL_TEXTURE0 + i);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+            glBindTexture(GL_TEXTURE_3D, 0);
+            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        }
+        glActiveTexture(GL_TEXTURE0);
+        
+        // Unbind all framebuffer targets
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        
+        // Unbind vertex array and buffer objects
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
+        
+        // Reset pixel store state
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+        glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
+        glPixelStorei(GL_UNPACK_LSB_FIRST, GL_FALSE);
+        
+        // Reset viewport to default
+        GLint viewport[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        if (viewport[2] > 0 && viewport[3] > 0) {
+            glViewport(0, 0, viewport[2], viewport[3]);
+        }
+        
+        // Disable blending and depth testing
+        glDisable(GL_BLEND);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_CULL_FACE);
+        
+        // Restore program if it was set
+        if (current_program != 0) {
+            glUseProgram(current_program);
+        }
+        
+        // Force GPU synchronization
+        glFlush();
+        
+        check_gl_errors_enhanced("reset_gl_context_state");
+        
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Exception during context state reset: %s\n", e.what());
     }
-    glActiveTexture(GL_TEXTURE0);
-    
-    // Unbind framebuffers
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    
-    // Reset pixel store state
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glPixelStorei(GL_PACK_ALIGNMENT, 4);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-    glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
-    glPixelStorei(GL_UNPACK_LSB_FIRST, GL_FALSE);
-    
-    // Clear any pending errors
-    check_gl_errors("reset_gl_context_state");
     
     fprintf(stderr, "[pyvvisf] [DEBUG] OpenGL context state reset complete\n");
 }
