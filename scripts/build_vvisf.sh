@@ -58,19 +58,12 @@ fi
 
 echo "Applying Linux support patches..."
 
-# Check if Linux patches are already applied
-if grep -q "else ifeq (\$(shell uname),Linux)" VVGL/Makefile && grep -q "CXX = g++" VVGL/Makefile && grep -q "VVGL_SDK_GLFW" VVGL/Makefile; then
-    echo "✓ Linux patches already applied"
-else
-    # Apply the Linux patch
-    if patch -p1 < "$LINUX_PATCH_FILE"; then
-        echo "✓ Linux patches applied successfully"
-    else
-        echo "✗ Failed to apply Linux patches"
-        echo "Attempting manual Linux configuration..."
-        
-        # Create a temporary file with the Linux configuration
-        cat > /tmp/linux_config.txt << 'EOF'
+# Check if Linux section is empty and apply configuration if needed
+if grep -A 1 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile | grep -q "^else ifeq"; then
+    echo "Linux section is empty, applying Linux configuration..."
+    
+    # Create a temporary file with the Linux configuration
+    cat > /tmp/linux_config.txt << 'EOF'
 	CXX = g++
 	
 	CPPFLAGS := -Wall -g -std=c++11 -fPIC -O3
@@ -89,16 +82,17 @@ else
 	LDFLAGS += -lglfw -lGLEW -lGL -lX11 -lXrandr -lXinerama -lXcursor -lm -ldl
 	LDFLAGS += -lpthread
 EOF
-        
-        # Apply to VVGL Makefile
-        sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVGL/Makefile
-        
-        # Apply to VVISF Makefile
-        sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVISF/Makefile
-        
-        rm /tmp/linux_config.txt
-        echo "✓ Manual Linux configuration applied"
-    fi
+    
+    # Apply to VVGL Makefile
+    sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVGL/Makefile
+    
+    # Apply to VVISF Makefile
+    sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVISF/Makefile
+    
+    rm /tmp/linux_config.txt
+    echo "✓ Linux configuration applied"
+else
+    echo "✓ Linux configuration already present"
 fi
 
 # Build VVGL with GLFW support
