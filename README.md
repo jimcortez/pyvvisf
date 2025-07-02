@@ -73,35 +73,53 @@ The project automatically installs required Python dependencies including pybind
 
 1. **Clone the repository and initialize submodules**:
    ```bash
-   git clone https://github.com/yourusername/pyvvisf.git
+   git clone https://github.com/jimcortez/pyvvisf.git
    cd pyvvisf
    git submodule update --init --recursive
    ```
 
-2. **Set up Python environment**:
+2. **Quick Build (Recommended)**:
    ```bash
-   # Install pyenv if not already installed
-   make install-pyenv
-   
-   # Set up the development environment
-   make setup
+   # Use the automated build script
+   ./scripts/build.sh
    ```
 
-   This will:
-   - Install the required Python version (3.11.7)
-   - Build VVISF-GL libraries
-   - Install Python dependencies
+   This script will:
+   - Check all dependencies
+   - Clean previous builds
+   - Clone and patch VVISF-GL
+   - Build VVGL and VVISF libraries
    - Build the Python extension
+   - Run basic tests
 
-3. **Alternative manual setup**:
+3. **Manual Build**:
    ```bash
    # Set Python version
    pyenv local 3.11.7
    
-   # Build VVISF libraries
-   ./scripts/build_vvisf.sh
+   # Apply GLFW support patches
+   cd external/VVISF-GL
+   git apply ../../patches/vvisf-glfw-support.patch
+   cd ../..
    
-   # Install Python package
+   # Build VVGL and VVISF libraries
+   cd external/VVISF-GL/VVGL
+   make clean
+   ARCH=arm64 make
+   cd ../VVISF
+   make clean
+   ARCH=arm64 make
+   cd ../..
+   
+   # Build Python extension
+   mkdir build && cd build
+   cmake ..
+   make
+   cd ..
+   ```
+
+4. **Install Python package** (optional):
+   ```bash
    pip install -e .
    ```
 

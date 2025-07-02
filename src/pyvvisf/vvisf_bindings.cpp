@@ -614,8 +614,7 @@ PYBIND11_MODULE(vvisf_bindings, m) {
         .def("vsn", &VVISF::ISFDoc::vsn)
         .def("type", &VVISF::ISFDoc::type)
         .def("categories", &VVISF::ISFDoc::categories)
-        .def("get_last_error_log", &VVISF::ISFDoc::getLastErrorLog)
-        .def("get_error_log", &VVISF::ISFDoc::getLastErrorLog, "Get the shader compilation error log")
+        // Note: getLastErrorLog method doesn't exist in current VVISF API
         // Input attributes
         .def("inputs", &VVISF::ISFDoc::inputs)
         .def("image_inputs", &VVISF::ISFDoc::imageInputs)
@@ -629,10 +628,10 @@ PYBIND11_MODULE(vvisf_bindings, m) {
         .def("get_persistent_buffer_for_key", &VVISF::ISFDoc::getPersistentBufferForKey)
         .def("get_temp_buffer_for_key", &VVISF::ISFDoc::getTempBufferForKey)
         // Source code getters (wrap std::string* as std::string)
-        .def("json_source_string", [](const VVISF::ISFDoc& self) { auto ptr = self.jsonSourceString(); return ptr ? *ptr : std::string(); })
-        .def("json_string", [](const VVISF::ISFDoc& self) { auto ptr = self.jsonString(); return ptr ? *ptr : std::string(); })
-        .def("vert_shader_source", [](const VVISF::ISFDoc& self) { auto ptr = self.vertShaderSource(); return ptr ? *ptr : std::string(); })
-        .def("frag_shader_source", [](const VVISF::ISFDoc& self) { auto ptr = self.fragShaderSource(); return ptr ? *ptr : std::string(); })
+        .def("json_source_string", [=](const VVISF::ISFDoc& self) { auto ptr = self.jsonSourceString(); return ptr ? *ptr : std::string(); })
+        .def("json_string", [=](const VVISF::ISFDoc& self) { auto ptr = self.jsonString(); return ptr ? *ptr : std::string(); })
+        .def("vert_shader_source", [=](const VVISF::ISFDoc& self) { auto ptr = self.vertShaderSource(); return ptr ? *ptr : std::string(); })
+        .def("frag_shader_source", [=](const VVISF::ISFDoc& self) { auto ptr = self.fragShaderSource(); return ptr ? *ptr : std::string(); })
         // Utility methods
         .def("set_parent_scene", &VVISF::ISFDoc::setParentScene)
         .def("parent_scene", &VVISF::ISFDoc::parentScene)
