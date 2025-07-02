@@ -37,6 +37,13 @@ jobs:
           exit 1
         fi
 
+    - name: Build VVISF libraries
+      run: |
+        echo "Building VVISF libraries..."
+        chmod +x scripts/build_vvisf.sh
+        ./scripts/build_vvisf.sh
+        echo "VVISF libraries built successfully"
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -85,6 +92,13 @@ jobs:
           echo "ERROR: external/ directory not found after submodule initialization"
           exit 1
         fi
+
+    - name: Build VVISF libraries
+      run: |
+        echo "Building VVISF libraries..."
+        chmod +x scripts/build_vvisf.sh
+        ./scripts/build_vvisf.sh
+        echo "VVISF libraries built successfully"
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.0.0
