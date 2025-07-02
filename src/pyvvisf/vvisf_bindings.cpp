@@ -604,14 +604,76 @@ std::shared_ptr<VVGL::GLBuffer> pil_image_to_glbuffer(py::object pil_image) {
     }
 }
 
-// Helper for create_and_render_a_buffer
+// Enhanced helper for create_and_render_a_buffer with robust error handling
 static VVGL::GLBufferRef pyvvisf_create_and_render_a_buffer(VVISF::ISFScene& self, const VVGL::Size& size, double render_time, py::dict out_pass_dict, VVGL::GLBufferPoolRef pool_ref) {
-    std::map<int32_t, VVGL::GLBufferRef> pass_dict;
-    VVGL::GLBufferRef result = self.createAndRenderABuffer(size, render_time, &pass_dict, pool_ref);
-    for (const auto& pair : pass_dict) {
-        out_pass_dict[py::int_(pair.first)] = pair.second;
+    // Validate input parameters
+    if (size.width <= 0 || size.height <= 0) {
+        throw std::invalid_argument("Invalid size: width and height must be positive. Got: " + 
+                                  std::to_string(size.width) + "x" + std::to_string(size.height));
     }
-    return result;
+    
+    // Sanity check for reasonable dimensions to prevent excessive memory allocation
+    const double max_dimension = 16384; // 16K should be reasonable maximum
+    if (size.width > max_dimension || size.height > max_dimension) {
+        throw std::invalid_argument("Size too large: maximum dimension is " + std::to_string(max_dimension) + 
+                                  ". Got: " + std::to_string(size.width) + "x" + std::to_string(size.height));
+    }
+    
+    // Ensure OpenGL context is current before rendering
+    if (!ensure_gl_context_current()) {
+        throw std::runtime_error("Failed to make OpenGL context current for rendering");
+    }
+    
+    // Check if scene has a valid document loaded
+    if (!self.doc()) {
+        throw std::runtime_error("ISFScene has no document loaded. Call use_doc() first.");
+    }
+    
+    try {
+        // Reset OpenGL state to prevent state pollution from previous operations
+        reset_gl_context_state();
+        
+        // Clear any pending OpenGL errors before rendering
+        check_gl_errors("pre-render state");
+        
+        // Perform the actual rendering
+        std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+        VVGL::GLBufferRef result = self.createAndRenderABuffer(size, render_time, &pass_dict, pool_ref);
+        
+        // Check for OpenGL errors after rendering
+        check_gl_errors("post-render");
+        
+        // Validate the result
+        if (!result) {
+            throw std::runtime_error("Rendering failed: createAndRenderABuffer returned null buffer");
+        }
+        
+        // Validate buffer properties
+        if (result->name == 0) {
+            throw std::runtime_error("Rendering failed: invalid OpenGL texture name in result buffer");
+        }
+        
+        // Copy pass dictionary to Python dict
+        for (const auto& pair : pass_dict) {
+            out_pass_dict[py::int_(pair.first)] = pair.second;
+        }
+        
+        return result;
+        
+    } catch (const std::exception& e) {
+        // Log the error for debugging
+        fprintf(stderr, "[pyvvisf] [ERROR] Exception in create_and_render_a_buffer: %s\n", e.what());
+        
+        // Attempt to clean up OpenGL state after error
+        try {
+            reset_gl_context_state();
+        } catch (...) {
+            // Ignore cleanup errors
+        }
+        
+        // Re-throw the original exception
+        throw;
+    }
 }
 
 // Helper for render_to_buffer
