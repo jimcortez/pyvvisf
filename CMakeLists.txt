@@ -49,7 +49,7 @@ endif()
 
 # Architecture detection and configuration
 if(DEFINED ENV{ARCH})
-    set(TARGET_ARCH $ENV{ARCH})
+    set(TARGET_ARCH ${ENV{ARCH}})
     message(STATUS "Target architecture: ${TARGET_ARCH}")
     
     if(APPLE)
