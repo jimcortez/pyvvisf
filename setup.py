@@ -241,29 +241,20 @@ class CMakeBuild(build_ext):
 def main():
     """Main setup function."""
     
+    # Import version from the generated file
+    try:
+        from src.pyvvisf._version import __version__
+    except ImportError:
+        # Fallback for when version file doesn't exist yet
+        __version__ = "0.0.0"
+    
     setup(
         name="pyvvisf",
+        version=__version__,
         ext_modules=[CMakeExtension("pyvvisf")],
         cmdclass={"build_ext": CMakeBuild},
         zip_safe=False,
         python_requires=">=3.8",
-        install_requires=[
-            "numpy>=1.21.0",
-            "pillow>=9.0.0",
-        ],
-        extras_require={
-            "dev": [
-                "pytest>=7.0.0",
-                "pytest-cov>=4.0.0",
-                "black>=22.0.0",
-                "isort>=5.0.0",
-                "flake8>=5.0.0",
-                "mypy>=1.0.0",
-                "pre-commit>=2.20.0",
-                "cibuildwheel>=3.0.0",
-                "build>=0.10.0",
-            ],
-        },
         classifiers=[
             "Development Status :: 3 - Alpha",
             "Intended Audience :: Developers",
