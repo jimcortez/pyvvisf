@@ -199,6 +199,9 @@ test_build/
 ehthumbs.db
 Thumbs.db
 
+# External dependencies (managed as submodules)
+external/VVISF-GL/
+
 # VVISF specific
 external/VVISF-GL/VVGL/bin/
 external/VVISF-GL/VVISF/bin/
