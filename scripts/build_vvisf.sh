@@ -7,7 +7,8 @@ echo "Building VVISF-GL libraries with GLFW support..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 VVISF_DIR="$PROJECT_ROOT/external/VVISF-GL"
-PATCH_FILE="$PROJECT_ROOT/patches/vvisf-glfw-support.patch"
+GLFW_PATCH_FILE="$PROJECT_ROOT/patches/vvisf-glfw-support.patch"
+LINUX_PATCH_FILE="$PROJECT_ROOT/patches/vvisf-linux-support.patch"
 
 # Check if VVISF-GL submodule exists
 if [ ! -f "$VVISF_DIR/README.md" ]; then
@@ -16,9 +17,15 @@ if [ ! -f "$VVISF_DIR/README.md" ]; then
     exit 1
 fi
 
-# Check if patch file exists
-if [ ! -f "$PATCH_FILE" ]; then
-    echo "Error: GLFW support patch not found at $PATCH_FILE"
+# Check if patch files exist
+if [ ! -f "$GLFW_PATCH_FILE" ]; then
+    echo "Error: GLFW support patch not found at $GLFW_PATCH_FILE"
+    echo "Please ensure the patch file exists and try again."
+    exit 1
+fi
+
+if [ ! -f "$LINUX_PATCH_FILE" ]; then
+    echo "Error: Linux support patch not found at $LINUX_PATCH_FILE"
     echo "Please ensure the patch file exists and try again."
     exit 1
 fi
@@ -32,32 +39,34 @@ else
     echo "Detected x86_64 architecture"
 fi
 
-# Apply GLFW patches
+# Apply patches
 cd "$VVISF_DIR"
 echo "Applying GLFW support patches..."
 
-# Check if patches are already applied
+# Check if GLFW patches are already applied
 if grep -q "VVGL_SDK_GLFW" VVGL/Makefile && grep -q "VVGL_SDK_GLFW" VVISF/Makefile; then
     echo "✓ GLFW patches already applied"
 else
-    # Apply the patch
-    if patch -p1 < "$PATCH_FILE"; then
+    # Apply the GLFW patch
+    if patch -p1 < "$GLFW_PATCH_FILE"; then
         echo "✓ GLFW patches applied successfully"
     else
         echo "✗ Failed to apply GLFW patches"
-        echo ""
-        echo "Manual patch application required:"
-        echo "1. Edit external/VVISF-GL/VVGL/Makefile:"
-        echo "   - Change '-DVVGL_SDK_MAC' to '-DVVGL_SDK_GLFW'"
-        echo "   - Add '-I/opt/homebrew/include' to CPPFLAGS"
-        echo "   - Add '-L/opt/homebrew/lib -lglfw -lGLEW' to LDFLAGS"
-        echo ""
-        echo "2. Edit external/VVISF-GL/VVISF/Makefile:"
-        echo "   - Change '-DVVGL_SDK_MAC' to '-DVVGL_SDK_GLFW'"
-        echo "   - Add '-I/opt/homebrew/include' to CPPFLAGS"
-        echo "   - Add '-L/opt/homebrew/lib -lglfw -lGLEW' to LDFLAGS"
-        echo ""
-        echo "Then run this script again."
+        exit 1
+    fi
+fi
+
+echo "Applying Linux support patches..."
+
+# Check if Linux patches are already applied
+if grep -q "else ifeq (\$(shell uname),Linux)" VVGL/Makefile && grep -q "CXX = g++" VVGL/Makefile; then
+    echo "✓ Linux patches already applied"
+else
+    # Apply the Linux patch
+    if patch -p1 < "$LINUX_PATCH_FILE"; then
+        echo "✓ Linux patches applied successfully"
+    else
+        echo "✗ Failed to apply Linux patches"
         exit 1
     fi
 fi
