@@ -58,7 +58,20 @@ fi
 
 echo "Applying Linux support patches..."
 
+# Debug platform detection
+echo "Debug: Checking platform detection..."
+echo "Debug: uname output: $(uname)"
+echo "Debug: /etc/os-release content:"
+if [ -f /etc/os-release ]; then
+    cat /etc/os-release
+else
+    echo "Debug: /etc/os-release not found"
+fi
+
 # Check if Linux section is empty and apply configuration if needed
+echo "Debug: Checking Linux section in VVGL Makefile..."
+grep -A 5 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile
+
 if grep -A 1 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile | grep -q "^else ifeq"; then
     echo "Linux section is empty, applying Linux configuration..."
     
