@@ -19,6 +19,7 @@ jobs:
         submodules: recursive
 
     - name: Initialize submodules
+      shell: bash
       run: |
         echo "Current directory: $(pwd)"
         echo "Repository contents:"
@@ -38,6 +39,7 @@ jobs:
         fi
 
     - name: Build VVISF libraries
+      shell: bash
       run: |
         echo "Building VVISF libraries..."
         echo "Current directory: $(pwd)"
@@ -86,7 +88,9 @@ jobs:
       with:
         submodules: recursive
 
-    - name: Initialize submodules
+    - name: Initialize submodules (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
       run: |
         echo "Current directory: $(pwd)"
         echo "Repository contents:"
@@ -105,7 +109,30 @@ jobs:
           exit 1
         fi
 
-    - name: Build VVISF libraries
+    - name: Initialize submodules (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Write-Host "Current directory: $(Get-Location)"
+        Write-Host "Repository contents:"
+        Get-ChildItem -Force
+        Write-Host "Git submodule status:"
+        git submodule status
+        Write-Host "Initializing submodules..."
+        git submodule update --init --recursive
+        Write-Host "After submodule initialization:"
+        Get-ChildItem -Force
+        if (Test-Path "external") {
+          Write-Host "External directory contents:"
+          Get-ChildItem -Force external/
+        } else {
+          Write-Host "ERROR: external/ directory not found after submodule initialization"
+          exit 1
+        }
+
+    - name: Build VVISF libraries (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
       run: |
         echo "Building VVISF libraries..."
         echo "Current directory: $(pwd)"
@@ -124,10 +151,44 @@ jobs:
         ./scripts/build_vvisf.sh
         echo "VVISF libraries built successfully"
 
+    - name: Build VVISF libraries (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "Building VVISF libraries on macOS..."
+        echo "Current directory: $(pwd)"
+        echo "Checking VVISF-GL submodule..."
+        ls -la external/VVISF-GL/
+        echo "Checking for required dependencies..."
+        which gcc || echo "gcc not found"
+        which g++ || echo "g++ not found"
+        which make || echo "make not found"
+        echo "Installing system dependencies..."
+        brew install cmake glfw glew
+        echo "Making build script executable..."
+        chmod +x scripts/build_vvisf.sh
+        echo "Running build script..."
+        ./scripts/build_vvisf.sh
+        echo "VVISF libraries built successfully"
+
+    - name: Build VVISF libraries (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Write-Host "Building VVISF libraries on Windows..."
+        Write-Host "Current directory: $(Get-Location)"
+        Write-Host "Checking VVISF-GL submodule..."
+        Get-ChildItem -Force external/VVISF-GL/
+        Write-Host "Checking for required dependencies..."
+        try { Get-Command msbuild -ErrorAction Stop } catch { Write-Host "MSBuild not found" }
+        Write-Host "VVISF libraries will be built by cibuildwheel dependency installation script"
+
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.0.0
       env:
-        CIBW_BEFORE_ALL: scripts/install_dependencies.sh
+        CIBW_BEFORE_ALL_LINUX: scripts/install_dependencies.sh
+        CIBW_BEFORE_ALL_MACOS: scripts/install_dependencies.sh
+        CIBW_BEFORE_ALL_WINDOWS: scripts/install_dependencies.ps1
         CIBW_ENVIRONMENT: VVISF_BUILD_TYPE=wheel
         CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-*"
         CIBW_SKIP: "*-musllinux*"

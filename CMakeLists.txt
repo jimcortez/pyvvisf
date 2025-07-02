@@ -89,8 +89,13 @@ include_directories(
 add_definitions(-D${VVGL_SDK})
 
 # Pre-built VVISF libraries
-set(VVGL_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVGL/bin/libVVGL.a)
-set(VVISF_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVISF/bin/libVVISF.a)
+if(WIN32)
+    set(VVGL_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVGL/bin/VVGL.lib)
+    set(VVISF_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVISF/bin/VVISF.lib)
+else()
+    set(VVGL_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVGL/bin/libVVGL.a)
+    set(VVISF_LIBRARY ${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/VVISF/bin/libVVISF.a)
+endif()
 
 # Check if libraries exist
 if(NOT EXISTS ${VVGL_LIBRARY})
