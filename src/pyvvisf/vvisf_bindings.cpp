@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <optional>
+#include <mutex>
 
 // VVISF includes
 #include "VVISF.hpp"
@@ -76,11 +77,10 @@ std::string isf_file_type_to_string(VVISF::ISFFileType type) {
     return VVISF::ISFFileTypeString(type);
 }
 
-
-
-// Global GLFW window for OpenGL context
+// Global GLFW window for OpenGL context with thread safety
 static GLFWwindow* g_glfw_window = nullptr;
 static bool g_glfw_initialized = false;
+static std::mutex g_glfw_mutex;
 
 // Helper to get OpenGL version string
 std::string get_opengl_version() {
@@ -89,27 +89,35 @@ std::string get_opengl_version() {
     return "(null)";
 }
 
-// Initialize GLFW and OpenGL context
+// Initialize GLFW and OpenGL context with improved error handling
 bool initialize_glfw_context() {
+    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    
     if (g_glfw_initialized && g_glfw_window) {
         glfwMakeContextCurrent(g_glfw_window);
         return true;
     }
+    
+    // Clean up any existing window
     if (g_glfw_window) {
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
     }
     g_glfw_initialized = false;
+    
     // Initialize GLFW
     if (!glfwInit()) {
         fprintf(stderr, "[VVISF] Failed to initialize GLFW\n");
         return false;
     }
+    
     // Configure GLFW for OpenGL
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // Hidden window
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+    
     // Create window
     g_glfw_window = glfwCreateWindow(100, 100, "Offscreen", NULL, NULL);
     if (!g_glfw_window) {
@@ -117,52 +125,97 @@ bool initialize_glfw_context() {
         glfwTerminate();
         return false;
     }
+    
     // Make context current
     glfwMakeContextCurrent(g_glfw_window);
+    
     // Initialize GLEW
     glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) {
-        fprintf(stderr, "[VVISF] Failed to initialize GLEW\n");
+    GLenum glew_result = glewInit();
+    if (glew_result != GLEW_OK) {
+        fprintf(stderr, "[VVISF] Failed to initialize GLEW: %s\n", glewGetErrorString(glew_result));
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
         glfwTerminate();
         return false;
     }
+    
+    // Check for OpenGL errors after GLEW initialization
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "[VVISF] OpenGL error after GLEW init: %d\n", err);
+        // Don't fail here, as some drivers report errors during GLEW init
+    }
+    
     g_glfw_initialized = true;
+    
     // Initialize VVISF global buffer pool
-    VVGL::GLContextRef gl_ctx = VVGL::CreateGLContextRefUsing(g_glfw_window);
-    if (!gl_ctx) {
-        fprintf(stderr, "[VVISF] Failed to create VVGL::GLContextRefUsing\n");
+    try {
+        VVGL::GLContextRef gl_ctx = VVGL::CreateGLContextRefUsing(g_glfw_window);
+        if (!gl_ctx) {
+            fprintf(stderr, "[VVISF] Failed to create VVGL::GLContextRefUsing\n");
+            glfwDestroyWindow(g_glfw_window);
+            g_glfw_window = nullptr;
+            glfwTerminate();
+            g_glfw_initialized = false;
+            return false;
+        }
+        VVGL::CreateGlobalBufferPool(gl_ctx);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[VVISF] Exception during VVISF initialization: %s\n", e.what());
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
         glfwTerminate();
+        g_glfw_initialized = false;
         return false;
     }
-    VVGL::CreateGlobalBufferPool(gl_ctx);
+    
     return true;
 }
 
-// Expose a function to reinitialize the context
-bool reinitialize_glfw_context() {
+// Clean up GLFW context
+void cleanup_glfw_context() {
+    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    
     if (g_glfw_window) {
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
     }
     g_glfw_initialized = false;
+}
+
+// Expose a function to reinitialize the context
+bool reinitialize_glfw_context() {
+    // Clean up existing context
+    cleanup_glfw_context();
+    
+    // Now initialize new context (this will acquire the lock internally)
     return initialize_glfw_context();
 }
 
 // Expose a function to get OpenGL/GLFW/VVISF info
 py::dict get_gl_info() {
+    std::lock_guard<std::mutex> lock(g_glfw_mutex);
+    
     py::dict info;
     info["glfw_initialized"] = g_glfw_initialized;
     info["window_ptr"] = reinterpret_cast<uintptr_t>(g_glfw_window);
+    
     if (g_glfw_window) {
         glfwMakeContextCurrent(g_glfw_window);
         info["opengl_version"] = get_opengl_version();
+        
+        // Get additional OpenGL info
+        const GLubyte* vendor = glGetString(GL_VENDOR);
+        const GLubyte* renderer = glGetString(GL_RENDERER);
+        info["opengl_vendor"] = vendor ? std::string(reinterpret_cast<const char*>(vendor)) : "(null)";
+        info["opengl_renderer"] = renderer ? std::string(reinterpret_cast<const char*>(renderer)) : "(null)";
     } else {
         info["opengl_version"] = py::none();
+        info["opengl_vendor"] = py::none();
+        info["opengl_renderer"] = py::none();
     }
+    
     return info;
 }
 
@@ -180,7 +233,15 @@ bool ensure_gl_context_current() {
     return false;
 }
 
-// Convert GLBuffer to PIL Image (RGBA format)
+// Safe OpenGL error checking
+void check_gl_errors(const std::string& operation) {
+    GLenum err;
+    while ((err = glGetError()) != GL_NO_ERROR) {
+        fprintf(stderr, "[VVISF] OpenGL error during %s: %d\n", operation.c_str(), err);
+    }
+}
+
+// Convert GLBuffer to PIL Image (RGBA format) with improved error handling
 py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) {
     if (!buffer || buffer->name == 0) {
         throw std::runtime_error("Invalid GLBuffer: no OpenGL texture");
@@ -192,13 +253,16 @@ py::object glbuffer_to_pil_image(const std::shared_ptr<VVGL::GLBuffer>& buffer) 
     
     // Bind the texture
     glBindTexture(GL_TEXTURE_2D, buffer->name);
+    check_gl_errors("glBindTexture");
     
     // Get texture size
     GLint width, height;
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+    check_gl_errors("glGetTexLevelParameteriv");
     
     if (width <= 0 || height <= 0) {
+        glBindTexture(GL_TEXTURE_2D, 0);
         throw std::runtime_error("Invalid texture dimensions");
     }
     
@@ -771,6 +835,7 @@ PYBIND11_MODULE(vvisf_bindings, m) {
     m.attr("__available__") = is_vvisf_available();
 
     m.def("reinitialize_glfw_context", &reinitialize_glfw_context, "Reinitialize the GLFW/OpenGL context");
+    m.def("cleanup_glfw_context", &cleanup_glfw_context, "Clean up the GLFW/OpenGL context");
     m.def("get_gl_info", &get_gl_info, "Get OpenGL/GLFW/VVISF context info");
     m.def("initialize_glfw_context", &initialize_glfw_context, "Initialize the GLFW/OpenGL context");
 

@@ -44,6 +44,7 @@ __all__ = [
     'get_gl_info',
     'get_platform_info',
     'is_vvisf_available',
+    'initialize_glfw_context',
 
     'isf_val_type_to_string',
     'isf_file_type_to_string',
@@ -74,6 +75,7 @@ try:
     get_gl_info = _vvisf.get_gl_info
     get_platform_info = _vvisf.get_platform_info
     is_vvisf_available = _vvisf.is_vvisf_available
+    initialize_glfw_context = _vvisf.initialize_glfw_context
 
     isf_val_type_to_string = _vvisf.isf_val_type_to_string
     isf_file_type_to_string = _vvisf.isf_file_type_to_string
@@ -95,11 +97,22 @@ def check_vvisf_availability():
     except Exception:
         return False
 
-# Initialize GLFW context on import if not already done
+# Initialize GLFW context on import to prevent segmentation faults
 def _initialize_on_import():
     """Initialize GLFW context when the module is imported."""
-    # Not available in current bindings
-    pass  # initialize_glfw_context not present in vvisf_bindings
+    try:
+        # Check if GLFW is already initialized
+        gl_info = get_gl_info()
+        if not gl_info.get('glfw_initialized', False):
+            # Initialize GLFW context automatically
+            if initialize_glfw_context():
+                print("[pyvvisf] GLFW context initialized automatically")
+            else:
+                print("[pyvvisf] Warning: Failed to initialize GLFW context automatically")
+                print("[pyvvisf] You may need to call initialize_glfw_context() manually before rendering")
+    except Exception as e:
+        print(f"[pyvvisf] Warning: Could not initialize GLFW context: {e}")
+        print("[pyvvisf] You may need to call initialize_glfw_context() manually before rendering")
 
 # Try to initialize on import
 _initialize_on_import()
@@ -116,9 +129,6 @@ ISFValType_Cube = _vvisf.ISFValType_Cube
 ISFValType_Image = _vvisf.ISFValType_Image
 ISFValType_Audio = _vvisf.ISFValType_Audio
 ISFValType_AudioFFT = _vvisf.ISFValType_AudioFFT
-
-# Export initialize_glfw_context
-initialize_glfw_context = _vvisf.initialize_glfw_context
 
 # Export ISFFileType_* at module level
 ISFFileType_None = _vvisf.ISFFileType_None
