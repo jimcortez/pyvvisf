@@ -76,30 +76,7 @@ std::string isf_file_type_to_string(VVISF::ISFFileType type) {
     return VVISF::ISFFileTypeString(type);
 }
 
-// Helper function to scan for ISF files
-std::vector<std::string> scan_for_isf_files(const std::string& folder_path, 
-                                           VVISF::ISFFileType file_type = VVISF::ISFFileType_None, 
-                                           bool recursive = true) {
-    auto files = VVISF::CreateArrayOfISFsForPath(folder_path, file_type, recursive);
-    if (files) {
-        return *files;
-    }
-    return {};
-}
 
-// Helper function to get default ISF files
-std::vector<std::string> get_default_isf_files(VVISF::ISFFileType file_type = VVISF::ISFFileType_None) {
-    auto files = VVISF::CreateArrayOfDefaultISFs(file_type);
-    if (files) {
-        return *files;
-    }
-    return {};
-}
-
-// Helper function to check if file is probably an ISF
-bool file_is_probably_isf(const std::string& path) {
-    return VVISF::FileIsProbablyAnISF(path);
-}
 
 // Global GLFW window for OpenGL context
 static GLFWwindow* g_glfw_window = nullptr;
@@ -484,17 +461,6 @@ PYBIND11_MODULE(vvisf_bindings, m) {
     // Module-level functions
     m.def("get_platform_info", &get_platform_info, "Get platform information");
     m.def("is_vvisf_available", &is_vvisf_available, "Check if VVISF is available");
-    m.def("scan_for_isf_files", &scan_for_isf_files, 
-          "Scan for ISF files in a directory",
-          py::arg("folder_path"), 
-          py::arg("file_type") = VVISF::ISFFileType_None, 
-          py::arg("recursive") = true);
-    m.def("get_default_isf_files", &get_default_isf_files,
-          "Get default ISF files",
-          py::arg("file_type") = VVISF::ISFFileType_None);
-    m.def("file_is_probably_isf", &file_is_probably_isf,
-          "Check if a file is probably an ISF file",
-          py::arg("path"));
     m.def("isf_val_type_to_string", &isf_val_type_to_string, "Convert ISFValType to string");
     m.def("isf_val_type_uses_image", &isf_val_type_uses_image, "Check if ISFValType uses image");
     m.def("isf_file_type_to_string", &isf_file_type_to_string, "Convert ISFFileType to string");

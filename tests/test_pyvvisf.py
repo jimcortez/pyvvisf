@@ -149,27 +149,6 @@ def test_gl_buffer_creation():
         pytest.skip("pyvvisf not available")
 
 
-def test_isf_file_utilities():
-    """Test ISF file utility functions."""
-    try:
-        import pyvvisf
-        
-        # Test file detection (should return False for non-existent file)
-        is_isf = pyvvisf.file_is_probably_isf("nonexistent.fs")
-        assert isinstance(is_isf, bool)
-        
-        # Test scanning for files (should return empty list for non-existent directory)
-        files = pyvvisf.scan_for_isf_files("nonexistent_directory")
-        assert isinstance(files, list)
-        assert len(files) == 0
-        
-        # Test getting default files
-        default_files = pyvvisf.get_default_isf_files()
-        assert isinstance(default_files, list)
-        
-    except ImportError:
-        pytest.skip("pyvvisf not available")
-
 
 def test_isf_val_type_strings():
     """Test ISF value type string conversion."""

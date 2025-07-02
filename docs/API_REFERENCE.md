@@ -233,31 +233,6 @@ Check if VVISF is working correctly.
 available = pyvvisf.is_vvisf_available()
 ```
 
-## ISF File Utilities
-
-### file_is_probably_isf(path)
-
-Check if a file is probably an ISF file.
-
-```python
-is_isf = pyvvisf.file_is_probably_isf("shader.fs")
-```
-
-### scan_for_isf_files(folder_path, file_type=None, recursive=True)
-
-Scan for ISF files in a directory.
-
-```python
-files = pyvvisf.scan_for_isf_files("./shaders", recursive=True)
-```
-
-### get_default_isf_files(file_type=None)
-
-Get default ISF files.
-
-```python
-default_files = pyvvisf.get_default_isf_files()
-```
 
 ### isf_val_type_to_string(type)
 

@@ -44,10 +44,7 @@ __all__ = [
     'get_gl_info',
     'get_platform_info',
     'is_vvisf_available',
-    # ISF file utilities
-    'scan_for_isf_files',
-    'get_default_isf_files',
-    'file_is_probably_isf',
+
     'isf_val_type_to_string',
     'isf_file_type_to_string',
 ]
@@ -77,10 +74,7 @@ try:
     get_gl_info = _vvisf.get_gl_info
     get_platform_info = _vvisf.get_platform_info
     is_vvisf_available = _vvisf.is_vvisf_available
-    # ISF file utilities
-    scan_for_isf_files = _vvisf.scan_for_isf_files
-    get_default_isf_files = _vvisf.get_default_isf_files
-    file_is_probably_isf = _vvisf.file_is_probably_isf
+
     isf_val_type_to_string = _vvisf.isf_val_type_to_string
     isf_file_type_to_string = _vvisf.isf_file_type_to_string
 except AttributeError as e:

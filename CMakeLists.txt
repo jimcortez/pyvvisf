@@ -9,11 +9,11 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/README.md")
             "This should be handled by the setup.py build process."
         )
     else()
-        message(FATAL_ERROR 
-            "VVISF-GL submodule not found!\n"
-            "Please run: git submodule update --init --recursive\n"
-            "Or run: ./scripts/setup.sh"
-        )
+    message(FATAL_ERROR 
+        "VVISF-GL submodule not found!\n"
+        "Please run: git submodule update --init --recursive\n"
+        "Or run: ./scripts/setup.sh"
+    )
     endif()
 endif()
 
@@ -97,7 +97,7 @@ if(NOT EXISTS ${VVGL_LIBRARY})
     if(BUILDING_WHEEL)
         message(FATAL_ERROR "VVGL library not found during wheel build: ${VVGL_LIBRARY}")
     else()
-        message(FATAL_ERROR "VVGL library not found: ${VVGL_LIBRARY}")
+    message(FATAL_ERROR "VVGL library not found: ${VVGL_LIBRARY}")
     endif()
 endif()
 
@@ -105,7 +105,7 @@ if(NOT EXISTS ${VVISF_LIBRARY})
     if(BUILDING_WHEEL)
         message(FATAL_ERROR "VVISF library not found during wheel build: ${VVISF_LIBRARY}")
     else()
-        message(FATAL_ERROR "VVISF library not found: ${VVISF_LIBRARY}")
+    message(FATAL_ERROR "VVISF library not found: ${VVISF_LIBRARY}")
     endif()
 endif()
 

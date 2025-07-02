@@ -19,5 +19,3 @@ This directory contains the complete documentation for pyvvisf.
 
 ### Project Information
 - **[Project Summary](PROJECT_SUMMARY.md)** - Overview of the project structure and goals
-- **[Wheel Migration Summary](WHEEL_MIGRATION_SUMMARY.md)** - Summary of the migration to wheel builds
-- **[Documentation Cleanup](DOCUMENTATION_CLEANUP.md)** - Summary of documentation reorganization 

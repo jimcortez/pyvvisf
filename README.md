@@ -77,23 +77,7 @@ image = buffer.to_pil_image()
 image.save("output.png")
 ```
 
-### Working with ISF Files
 
-```python
-import pyvvisf
-
-# Check if a file is an ISF file
-if pyvvisf.file_is_probably_isf("shader.fs"):
-    print("This looks like an ISF file!")
-
-# Scan for ISF files in a directory
-isf_files = pyvvisf.scan_for_isf_files("./shaders", recursive=True)
-print(f"Found {len(isf_files)} ISF files")
-
-# Get default ISF files
-default_files = pyvvisf.get_default_isf_files()
-print(f"Default ISF files: {default_files}")
-```
 
 ## Platform Support
 

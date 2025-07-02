@@ -212,10 +212,12 @@ class CMakeBuild(build_ext):
         
         # Add platform-specific arguments
         if sys.platform.startswith('darwin'):
-            cmake_args.extend([
-                '-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15',
-                '-DCMAKE_OSX_ARCHITECTURES=universal2'
-            ])
+            arch = self._detect_architecture()
+            cmake_args.append('-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15')
+            if arch == 'universal2':
+                cmake_args.append('-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64')
+            else:
+                cmake_args.append(f'-DCMAKE_OSX_ARCHITECTURES={arch}')
         elif sys.platform.startswith('win'):
             cmake_args.extend(['-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE'])
             
