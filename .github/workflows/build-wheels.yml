@@ -18,6 +18,9 @@ jobs:
       with:
         submodules: recursive
 
+    - name: Setup headless display
+      uses: pyvista/setup-headless-display-action@v3
+
     - name: Initialize submodules
       shell: bash
       run: |
@@ -195,6 +198,8 @@ jobs:
         CIBW_MACOS_ARCHS: "x86_64 arm64 universal2"
         CIBW_LINUX_ARCHS: "x86_64 aarch64"
         CIBW_WINDOWS_ARCHS: "x64"
+        # Headless display for Linux builds
+        CIBW_ENVIRONMENT_LINUX: VVISF_BUILD_TYPE=wheel DISPLAY=:99
       with:
         package-dir: .
         output-dir: wheelhouse
