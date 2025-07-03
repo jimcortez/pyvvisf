@@ -28,6 +28,10 @@
 
 namespace py = pybind11;
 
+// Forward declarations for safe wrappers
+VVISF::ISFDocRef CreateISFDocRef_SafeWrapper(const std::string& path, VVISF::ISFScene* parent_scene = nullptr, const bool& throw_except = true);
+VVISF::ISFDocRef CreateISFDocRefWith_SafeWrapper(const std::string& fs_contents, const std::string& imports_dir = "/", const std::string& vs_contents = std::string(VVISF::ISFVertPassthru_GL2), VVISF::ISFScene* parent_scene = nullptr, const bool& throw_except = true);
+
 // Platform detection function
 std::string get_platform_info() {
 #ifdef VVGL_SDK_MAC
@@ -53,11 +57,11 @@ bool is_vvisf_available() {
 }
 
 // Basic error handling wrapper
-class VVISFError : public std::exception {
+class VVISFError {
 public:
     explicit VVISFError(const std::string& message) : message_(message) {}
     
-    const char* what() const noexcept override {
+    const char* what() const noexcept {
         return message_.c_str();
     }
     
@@ -69,52 +73,48 @@ private:
 class ISFParseError : public std::exception {
 public:
     explicit ISFParseError(const std::string& message, const std::string& details = "") 
-        : message_(message), details_(details) {}
+        : message_(details.empty() ? message : message + "\nDetails: " + details) {}
     
     const char* what() const noexcept override {
         return message_.c_str();
     }
     
-    const std::string& get_details() const { return details_; }
-    
 private:
     std::string message_;
-    std::string details_;
 };
 
 class ShaderCompilationError : public std::exception {
 public:
     explicit ShaderCompilationError(const std::string& message, const std::string& shader_type = "", 
-                                   const std::string& details = "") 
-        : message_(message), shader_type_(shader_type), details_(details) {}
+                                   const std::string& details = "") {
+        message_ = message;
+        if (!shader_type.empty()) {
+            message_ += "\nShader type: " + shader_type;
+        }
+        if (!details.empty()) {
+            message_ += "\nDetails: " + details;
+        }
+    }
     
     const char* what() const noexcept override {
         return message_.c_str();
     }
     
-    const std::string& get_shader_type() const { return shader_type_; }
-    const std::string& get_details() const { return details_; }
-    
 private:
     std::string message_;
-    std::string shader_type_;
-    std::string details_;
 };
 
 class ShaderRenderingError : public std::exception {
 public:
     explicit ShaderRenderingError(const std::string& message, const std::string& details = "") 
-        : message_(message), details_(details) {}
+        : message_(details.empty() ? message : message + "\nDetails: " + details) {}
     
     const char* what() const noexcept override {
         return message_.c_str();
     }
     
-    const std::string& get_details() const { return details_; }
-    
 private:
     std::string message_;
-    std::string details_;
 };
 
 // Helper function to extract error details from ISFErr
@@ -286,60 +286,38 @@ std::string isf_file_type_to_string(VVISF::ISFFileType type) {
     return VVISF::ISFFileTypeString(type);
 }
 
-// Global GLFW window for OpenGL context with enhanced thread safety
+// Simple global GLFW window for OpenGL context (no thread safety)
 static GLFWwindow* g_glfw_window = nullptr;
 static bool g_glfw_initialized = false;
-static std::recursive_mutex g_glfw_mutex;  // Use recursive_mutex for same-thread re-entry
-static std::atomic<bool> g_context_valid{false};
+static bool g_context_valid = false;
 static GLuint g_debug_texture = 0;  // Debug texture to verify context validity
-static std::atomic<int> g_context_ref_count{0};  // Track context usage
-static std::atomic<bool> g_cleanup_in_progress{false};  // Prevent cleanup during operations
-
-// Thread-local storage for context validation
-thread_local bool tl_context_validated = false;
 
 // Forward declarations
 void reset_global_buffer_pool();
 
-// Enhanced OpenGL error checking with context validation
+// Simple OpenGL error checking (no thread safety)
 void check_gl_errors_enhanced(const std::string& operation) {
-    if (!g_context_valid.load() || g_cleanup_in_progress.load()) {
+    if (!g_context_valid) {
         fprintf(stderr, "[pyvvisf] [ERROR] OpenGL context not valid during %s\n", operation.c_str());
         return;
     }
     
     GLenum err;
-    bool has_errors = false;
     while ((err = glGetError()) != GL_NO_ERROR) {
-        has_errors = true;
         fprintf(stderr, "[pyvvisf] [ERROR] OpenGL error during %s: 0x%04X (%d)\n", operation.c_str(), err, err);
-    }
-    
-    if (has_errors) {
-        // Force context validation on next operation
-        tl_context_validated = false;
     }
 }
 
-// Validate OpenGL context state with enhanced safety
+// Simple OpenGL context validation (no thread safety)
 bool validate_gl_context() {
-    if (g_cleanup_in_progress.load()) {
+    if (!g_glfw_window || !g_context_valid) {
         return false;
-    }
-    
-    GLenum err;
-    if (!g_glfw_window || !g_context_valid.load()) {
-        return false;
-    }
-    
-    if (tl_context_validated) {
-        return true;
     }
     
     // Check if context is current
     if (glfwGetCurrentContext() != g_glfw_window) {
         glfwMakeContextCurrent(g_glfw_window);
-        err = glGetError();
+        GLenum err = glGetError();
         if (err != GL_NO_ERROR) {
             fprintf(stderr, "[pyvvisf] [ERROR] Failed to make context current: 0x%04X\n", err);
             return false;
@@ -349,14 +327,13 @@ bool validate_gl_context() {
     // Validate with a simple OpenGL call
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
-    err = glGetError();
+    GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         fprintf(stderr, "[pyvvisf] [ERROR] Context validation failed: 0x%04X\n", err);
-        g_context_valid.store(false);
+        g_context_valid = false;
         return false;
     }
     
-    tl_context_validated = true;
     return true;
 }
 
@@ -371,32 +348,22 @@ std::string get_opengl_version() {
     return "(null)";
 }
 
-// Safe context reference counting
+// Simple context reference functions (no thread safety)
 void acquire_context_ref() {
-    int old_count = g_context_ref_count.fetch_add(1);
-    fprintf(stderr, "[pyvvisf] [DEBUG] Context ref count: %d -> %d (acquire)\n", old_count, old_count + 1);
+    // No-op for non-thread-safe version
 }
 
 void release_context_ref() {
-    int old_count = g_context_ref_count.fetch_sub(1);
-    fprintf(stderr, "[pyvvisf] [DEBUG] Context ref count: %d -> %d (release)\n", old_count, old_count - 1);
+    // No-op for non-thread-safe version
 }
 
-// Enhanced GLFW context initialization with comprehensive error handling and safety
+// Simple GLFW context initialization (no thread safety)
 bool initialize_glfw_context() {
-    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
-    
-    // Prevent initialization during cleanup
-    if (g_cleanup_in_progress.load()) {
-        fprintf(stderr, "[pyvvisf] [WARN] Context initialization blocked during cleanup\n");
-        return false;
-    }
-    
     GLenum err;
     fprintf(stderr, "[pyvvisf] [DEBUG] Initializing GLFW context...\n");
     
     // If already initialized and valid, just ensure it's current
-    if (g_glfw_initialized && g_glfw_window && g_context_valid.load()) {
+    if (g_glfw_initialized && g_glfw_window && g_context_valid) {
         if (validate_gl_context()) {
             fprintf(stderr, "[pyvvisf] [DEBUG] Using existing valid GLFW context\n");
             return true;
@@ -404,66 +371,26 @@ bool initialize_glfw_context() {
         fprintf(stderr, "[pyvvisf] [WARN] Existing context invalid, reinitializing...\n");
     }
     
-    // Clean up any existing invalid context safely
+    // Clean up any existing context
     if (g_glfw_window) {
         fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up existing GLFW window\n");
         
-        // Mark cleanup in progress
-        g_cleanup_in_progress.store(true);
-        
-            // Wait for any ongoing operations to complete
-    int max_wait = 100; // 10 seconds max wait
-    int current_ref_count = g_context_ref_count.load();
-    fprintf(stderr, "[pyvvisf] [DEBUG] Waiting for context cleanup, current ref count: %d\n", current_ref_count);
-    
-    while (current_ref_count > 0 && max_wait > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        max_wait--;
-        current_ref_count = g_context_ref_count.load();
-        if (max_wait % 10 == 0) { // Log every second
-            fprintf(stderr, "[pyvvisf] [DEBUG] Still waiting, ref count: %d, max_wait: %d\n", current_ref_count, max_wait);
-        }
-    }
-    
-    if (current_ref_count > 0) {
-        fprintf(stderr, "[pyvvisf] [WARN] Context still in use after %d seconds, forcing cleanup (ref count: %d)\n", 10, current_ref_count);
-    } else {
-        fprintf(stderr, "[pyvvisf] [DEBUG] Context ref count reached 0, proceeding with cleanup\n");
-    }
-        
-        // Clean up OpenGL resources first
+        // Clean up OpenGL resources
         if (g_debug_texture != 0) {
             glfwMakeContextCurrent(g_glfw_window);
             glDeleteTextures(1, &g_debug_texture);
             g_debug_texture = 0;
         }
         
-        // Clean up VVISF resources
-        try {
-            VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
-            if (global_pool) {
-                fprintf(stderr, "[pyvvisf] [DEBUG] Before VVISF buffer pool cleanup, ref count: %d\n", g_context_ref_count.load());
-                global_pool->purge();
-                global_pool->housekeeping();
-                fprintf(stderr, "[pyvvisf] [DEBUG] After VVISF buffer pool cleanup, ref count: %d\n", g_context_ref_count.load());
-            }
-        } catch (const std::exception& e) {
-            fprintf(stderr, "[pyvvisf] [WARN] Exception during buffer pool cleanup: %s\n", e.what());
-        }
-        
         // Destroy window
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
-        
-        g_cleanup_in_progress.store(false);
     }
     
     // Reset state
     g_glfw_initialized = false;
-    g_context_valid.store(false);
-    tl_context_validated = false;
-    g_context_ref_count.store(0);
-    fprintf(stderr, "[pyvvisf] [DEBUG] Context state reset, ref count set to 0\n");
+    g_context_valid = false;
+    fprintf(stderr, "[pyvvisf] [DEBUG] Context state reset\n");
     
     // Initialize GLFW if needed
     if (!glfwInit()) {
@@ -561,9 +488,8 @@ bool initialize_glfw_context() {
     
     // Mark context as valid
     g_glfw_initialized = true;
-    g_context_valid.store(true);
-    tl_context_validated = true;
-    fprintf(stderr, "[pyvvisf] [DEBUG] Context marked as valid, ref count: %d\n", g_context_ref_count.load());
+    g_context_valid = true;
+    fprintf(stderr, "[pyvvisf] [DEBUG] Context marked as valid\n");
     
     // Initialize VVISF global buffer pool with enhanced error handling
     try {
@@ -579,7 +505,6 @@ bool initialize_glfw_context() {
         fprintf(stderr, "[pyvvisf] [DEBUG] Creating VVISF global buffer pool...\n");
         VVGL::CreateGlobalBufferPool(gl_ctx);
         fprintf(stderr, "[pyvvisf] [INFO] VVISF global buffer pool initialized successfully\n");
-        fprintf(stderr, "[pyvvisf] [DEBUG] After VVISF buffer pool creation, ref count: %d\n", g_context_ref_count.load());
         
     } catch (const std::exception& e) {
         fprintf(stderr, "[pyvvisf] [ERROR] Exception during VVISF initialization: %s\n", e.what());
@@ -593,7 +518,7 @@ bool initialize_glfw_context() {
         g_glfw_window = nullptr;
         glfwTerminate();
         g_glfw_initialized = false;
-        g_context_valid.store(false);
+        g_context_valid = false;
         return false;
     }
     
@@ -601,60 +526,32 @@ bool initialize_glfw_context() {
     return true;
 }
 
-// Reset the global buffer pool to clear all static/global state
+// Simple buffer pool reset (no thread safety)
 void reset_global_buffer_pool() {
     fprintf(stderr, "[pyvvisf] [DEBUG] Resetting global buffer pool...\n");
     
     try {
-        // Get the current global buffer pool
         VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
         if (global_pool) {
-            fprintf(stderr, "[pyvvisf] [DEBUG] Found existing global buffer pool, cleaning up...\n");
-            
-            // Clean up all buffers in the pool
             global_pool->purge();
             global_pool->housekeeping();
-            
-            // Force GPU sync
-            if (g_glfw_window) {
-                glfwMakeContextCurrent(g_glfw_window);
-                glFinish();
-            }
-            
-            fprintf(stderr, "[pyvvisf] [DEBUG] Global buffer pool cleaned up\n");
         }
         
-        // Set the global buffer pool to null to destroy it
         VVGL::SetGlobalBufferPool(nullptr);
-        fprintf(stderr, "[pyvvisf] [DEBUG] Global buffer pool set to null\n");
-        
-        // Force a small delay to allow any pending operations to complete
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        fprintf(stderr, "[pyvvisf] [DEBUG] Global buffer pool reset completed\n");
         
     } catch (const std::exception& e) {
         fprintf(stderr, "[pyvvisf] [ERROR] Exception during global buffer pool reset: %s\n", e.what());
     }
 }
 
-// Force cleanup all VVISF objects and static state
+// Simple VVISF state cleanup (no thread safety)
 void force_cleanup_vvisf_state() {
-    fprintf(stderr, "[pyvvisf] [DEBUG] Force cleaning up all VVISF state...\n");
+    fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up VVISF state...\n");
     
     try {
-        // Reset global buffer pool
         reset_global_buffer_pool();
-        
-        // Force context reference count to zero
-        g_context_ref_count.store(0);
-        fprintf(stderr, "[pyvvisf] [DEBUG] Forced context ref count to 0\n");
-        
-        // Mark context as invalid
-        g_context_valid.store(false);
-        tl_context_validated = false;
-        
-        // Force a longer delay to ensure all cleanup completes
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        
+        g_context_valid = false;
         fprintf(stderr, "[pyvvisf] [DEBUG] VVISF state cleanup completed\n");
         
     } catch (const std::exception& e) {
@@ -662,60 +559,12 @@ void force_cleanup_vvisf_state() {
     }
 }
 
-// Enhanced cleanup with proper ordering and safety
+// Simple GLFW context cleanup (no thread safety)
 void cleanup_glfw_context() {
-    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
-    
     fprintf(stderr, "[pyvvisf] [DEBUG] Cleaning up GLFW context...\n");
     
-    // Mark cleanup in progress
-    g_cleanup_in_progress.store(true);
-    
-    // Mark context as invalid immediately
-    g_context_valid.store(false);
-    tl_context_validated = false;
-    fprintf(stderr, "[pyvvisf] [DEBUG] Context marked as invalid, ref count: %d\n", g_context_ref_count.load());
-    
-    // Wait for any ongoing operations to complete
-    int max_wait = 100; // 10 seconds max wait
-    int current_ref_count = g_context_ref_count.load();
-    fprintf(stderr, "[pyvvisf] [DEBUG] Cleanup: waiting for context operations, current ref count: %d\n", current_ref_count);
-    
-    while (current_ref_count > 0 && max_wait > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        max_wait--;
-        current_ref_count = g_context_ref_count.load();
-        if (max_wait % 10 == 0) { // Log every second
-            fprintf(stderr, "[pyvvisf] [DEBUG] Cleanup: still waiting, ref count: %d, max_wait: %d\n", current_ref_count, max_wait);
-        }
-    }
-    
-    if (current_ref_count > 0) {
-        fprintf(stderr, "[pyvvisf] [WARN] Context still in use during cleanup (ref count: %d), forcing cleanup\n", current_ref_count);
-        // Force the ref count to zero for cleanup
-        g_context_ref_count.store(0);
-        fprintf(stderr, "[pyvvisf] [DEBUG] Forced context ref count to 0\n");
-    } else {
-        fprintf(stderr, "[pyvvisf] [DEBUG] Cleanup: context ref count reached 0\n");
-    }
-    
-    // Clean up VVISF resources first (highest level)
-    try {
-        VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
-        if (global_pool) {
-            // Make context current for cleanup
-            if (g_glfw_window && glfwGetCurrentContext() != g_glfw_window) {
-                glfwMakeContextCurrent(g_glfw_window);
-            }
-            
-            // Clean up all buffers
-            global_pool->purge();
-            global_pool->housekeeping();
-            fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool cleaned up\n");
-        }
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[pyvvisf] [WARN] Exception during buffer pool cleanup: %s\n", e.what());
-    }
+    // Mark context as invalid
+    g_context_valid = false;
     
     // Clean up OpenGL resources
     if (g_glfw_window) {
@@ -728,41 +577,25 @@ void cleanup_glfw_context() {
         
         // Force GPU sync
         glFinish();
-        check_gl_errors_enhanced("final cleanup");
     }
     
-    // Clean up GLFW resources (lowest level)
+    // Clean up GLFW resources
     if (g_glfw_window) {
         glfwDestroyWindow(g_glfw_window);
         g_glfw_window = nullptr;
         fprintf(stderr, "[pyvvisf] [DEBUG] GLFW window destroyed\n");
     }
     
-    // Note: Don't call glfwTerminate() here as it might be shared with other contexts
-    
     g_glfw_initialized = false;
-    g_cleanup_in_progress.store(false);
-    fprintf(stderr, "[pyvvisf] [DEBUG] GLFW context cleanup completed, final ref count: %d\n", g_context_ref_count.load());
+    fprintf(stderr, "[pyvvisf] [DEBUG] GLFW context cleanup completed\n");
 }
 
-// Safer context reinitialization with proper synchronization
+// Simple context reinitialization (no thread safety)
 bool reinitialize_glfw_context() {
     fprintf(stderr, "[pyvvisf] [DEBUG] Reinitializing GLFW context...\n");
     
-    // Prevent reinitialization during cleanup
-    if (g_cleanup_in_progress.load()) {
-        fprintf(stderr, "[pyvvisf] [WARN] Context reinitialization blocked during cleanup\n");
-        return false;
-    }
-    
-    // Force cleanup all VVISF state first to clear all static state
-    force_cleanup_vvisf_state();
-    
     // Clean up existing context
     cleanup_glfw_context();
-    
-    // Small delay to ensure cleanup completion
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     
     // Initialize new context
     bool result = initialize_glfw_context();
@@ -776,39 +609,31 @@ bool reinitialize_glfw_context() {
     return result;
 }
 
-// Enhanced context info with validation
+// Simple context info (no thread safety)
 py::dict get_gl_info() {
-    std::lock_guard<std::recursive_mutex> lock(g_glfw_mutex);
-    
     py::dict info;
     info["glfw_initialized"] = g_glfw_initialized;
-    info["context_valid"] = g_context_valid.load();
+    info["context_valid"] = g_context_valid;
     info["window_ptr"] = reinterpret_cast<uintptr_t>(g_glfw_window);
     info["debug_texture"] = g_debug_texture;
     
-    if (g_glfw_window && g_context_valid.load()) {
-        try {
-            if (validate_gl_context()) {
-                info["opengl_version"] = get_opengl_version();
-                
-                const GLubyte* vendor = glGetString(GL_VENDOR);
-                const GLubyte* renderer = glGetString(GL_RENDERER);
-                info["opengl_vendor"] = vendor ? std::string(reinterpret_cast<const char*>(vendor)) : "(null)";
-                info["opengl_renderer"] = renderer ? std::string(reinterpret_cast<const char*>(renderer)) : "(null)";
-                
-                GLint viewport[4];
-                glGetIntegerv(GL_VIEWPORT, viewport);
-                info["viewport_width"] = viewport[2];
-                info["viewport_height"] = viewport[3];
-            } else {
-                info["opengl_version"] = "(validation failed)";
-                info["opengl_vendor"] = "(validation failed)";
-                info["opengl_renderer"] = "(validation failed)";
-            }
-        } catch (const std::exception& e) {
-            info["opengl_version"] = std::string("(exception: ") + e.what() + ")";
-            info["opengl_vendor"] = "(exception)";
-            info["opengl_renderer"] = "(exception)";
+    if (g_glfw_window && g_context_valid) {
+        if (validate_gl_context()) {
+            info["opengl_version"] = get_opengl_version();
+            
+            const GLubyte* vendor = glGetString(GL_VENDOR);
+            const GLubyte* renderer = glGetString(GL_RENDERER);
+            info["opengl_vendor"] = vendor ? std::string(reinterpret_cast<const char*>(vendor)) : "(null)";
+            info["opengl_renderer"] = renderer ? std::string(reinterpret_cast<const char*>(renderer)) : "(null)";
+            
+            GLint viewport[4];
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            info["viewport_width"] = viewport[2];
+            info["viewport_height"] = viewport[3];
+        } else {
+            info["opengl_version"] = "(validation failed)";
+            info["opengl_vendor"] = "(validation failed)";
+            info["opengl_renderer"] = "(validation failed)";
         }
     } else {
         info["opengl_version"] = py::none();
@@ -833,7 +658,7 @@ void check_gl_errors(const std::string& operation) {
     check_gl_errors_enhanced(operation);
 }
 
-// Enhanced context state reset with comprehensive cleanup
+// Simple OpenGL context state reset (no thread safety)
 void reset_gl_context_state() {
     if (!ensure_gl_context_current()) {
         fprintf(stderr, "[pyvvisf] [ERROR] Failed to make OpenGL context current for state reset\n");
@@ -842,75 +667,19 @@ void reset_gl_context_state() {
     
     fprintf(stderr, "[pyvvisf] [DEBUG] Resetting OpenGL context state\n");
     
-    try {
-        // Save current program to restore later
-        GLint current_program = 0;
-        glGetIntegerv(GL_CURRENT_PROGRAM, &current_program);
-        
-        // Unbind all texture units
-        GLint max_texture_units = 0;
-        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_texture_units);
-        for (GLint i = 0; i < max_texture_units; ++i) {
-            glActiveTexture(GL_TEXTURE0 + i);
-            glBindTexture(GL_TEXTURE_2D, 0);
-            glBindTexture(GL_TEXTURE_RECTANGLE, 0);
-            glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
-            glBindTexture(GL_TEXTURE_3D, 0);
-            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-        }
-        glActiveTexture(GL_TEXTURE0);
-        
-        // Unbind all framebuffer targets
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        
-        // Unbind vertex array and buffer objects
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-        glBindBuffer(GL_UNIFORM_BUFFER, 0);
-        
-        // Reset pixel store state
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-        glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-        glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
-        glPixelStorei(GL_UNPACK_LSB_FIRST, GL_FALSE);
-        
-        // Reset viewport to default
-        GLint viewport[4];
-        glGetIntegerv(GL_VIEWPORT, viewport);
-        if (viewport[2] > 0 && viewport[3] > 0) {
-            glViewport(0, 0, viewport[2], viewport[3]);
-        }
-        
-        // Disable blending and depth testing
-        glDisable(GL_BLEND);
-        glDisable(GL_DEPTH_TEST);
-        glDisable(GL_STENCIL_TEST);
-        glDisable(GL_CULL_FACE);
-        
-        // Restore program if it was set
-        if (current_program != 0) {
-            glUseProgram(current_program);
-        }
-        
-        // Force GPU synchronization
-        glFlush();
-        
-        check_gl_errors_enhanced("reset_gl_context_state");
-        
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[pyvvisf] [ERROR] Exception during context state reset: %s\n", e.what());
-    }
+    // Basic state reset
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    
+    // Disable common state
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
     
     fprintf(stderr, "[pyvvisf] [DEBUG] OpenGL context state reset complete\n");
 }
 
-// Enhanced scene cleanup function
+// Simple scene cleanup function (no thread safety)
 void cleanup_scene_state(VVISF::ISFSceneRef& scene) {
     if (!scene) {
         return;
@@ -922,15 +691,11 @@ void cleanup_scene_state(VVISF::ISFSceneRef& scene) {
         // Reset OpenGL context state
         reset_gl_context_state();
         
-        // Perform buffer pool housekeeping to clean up idle textures
+        // Perform buffer pool housekeeping
         VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
         if (global_pool) {
             global_pool->housekeeping();
-            fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool housekeeping completed\n");
         }
-        
-        // Force a small delay to allow GPU operations to complete
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
         
     } catch (const std::exception& e) {
         fprintf(stderr, "[pyvvisf] [ERROR] Exception during scene cleanup: %s\n", e.what());
@@ -1251,7 +1016,7 @@ py::dict get_error_dict(const VVISF::ISFScene& scene) {
     return error_dict;
 }
 
-// Enhanced helper for create_and_render_a_buffer with robust error handling
+// Simple helper for create_and_render_a_buffer (no thread safety)
 static VVGL::GLBufferRef pyvvisf_create_and_render_a_buffer(VVISF::ISFScene& self, const VVGL::Size& size, double render_time, py::dict out_pass_dict, VVGL::GLBufferPoolRef pool_ref) {
     // Validate input parameters
     if (size.width <= 0 || size.height <= 0) {
@@ -1259,149 +1024,52 @@ static VVGL::GLBufferRef pyvvisf_create_and_render_a_buffer(VVISF::ISFScene& sel
                                   std::to_string(size.width) + "x" + std::to_string(size.height));
     }
     
-    // Sanity check for reasonable dimensions to prevent excessive memory allocation
-    const double max_dimension = 16384; // 16K should be reasonable maximum
-    if (size.width > max_dimension || size.height > max_dimension) {
-        throw std::invalid_argument("Size too large: maximum dimension is " + std::to_string(max_dimension) + 
-                                  ". Got: " + std::to_string(size.width) + "x" + std::to_string(size.height));
+    // Ensure OpenGL context is current before rendering
+    if (!ensure_gl_context_current()) {
+        throw std::runtime_error("Failed to make OpenGL context current for rendering");
     }
     
-    // Prevent rendering during cleanup
-    if (g_cleanup_in_progress.load()) {
-        fprintf(stderr, "[pyvvisf] [ERROR] Cannot render during context cleanup\n");
-        throw std::runtime_error("Cannot render during context cleanup");
+    // Check if scene has a valid document loaded
+    if (!self.doc()) {
+        throw std::runtime_error("ISFScene has no document loaded. Call use_doc() first.");
     }
     
-    // Acquire context reference
-    acquire_context_ref();
-    fprintf(stderr, "[pyvvisf] [DEBUG] Starting create_and_render_a_buffer, ref count: %d\n", g_context_ref_count.load());
+    // Perform the actual rendering
+    std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+    VVGL::GLBufferRef result = self.createAndRenderABuffer(size, render_time, &pass_dict, pool_ref);
     
-    try {
-        // Ensure OpenGL context is current before rendering
-        if (!ensure_gl_context_current()) {
-            throw std::runtime_error("Failed to make OpenGL context current for rendering");
-        }
-        
-        // Check if scene has a valid document loaded
-        if (!self.doc()) {
-            throw std::runtime_error("ISFScene has no document loaded. Call use_doc() first.");
-        }
-        
-        // Reset OpenGL state to prevent state pollution from previous operations
-        reset_gl_context_state();
-        
-        // Clear any pending OpenGL errors before rendering
-        check_gl_errors("pre-render state");
-        
-        // Perform the actual rendering
-        std::map<int32_t, VVGL::GLBufferRef> pass_dict;
-        VVGL::GLBufferRef result = self.createAndRenderABuffer(size, render_time, &pass_dict, pool_ref);
-        
-        // Check for OpenGL errors after rendering
-        check_gl_errors("post-render");
-        
-        // Check for compilation errors by examining the GLScene's program status
-        const VVGL::GLScene* gl_scene = dynamic_cast<const VVGL::GLScene*>(&self);
-        if (gl_scene && !gl_scene->programReady()) {
-            // Program compilation failed, extract error details
-            std::string error_msg = "Shader compilation failed";
-            std::string shader_type = "unknown";
-            std::string details = "Program is not ready after compilation attempt";
-            
-            // Try to get more specific error information from OpenGL
-            GLenum err = glGetError();
-            if (err != GL_NO_ERROR) {
-                details += " (OpenGL error: " + std::to_string(err) + ")";
-            }
-            
-            // Check if we can get shader compilation status
-            if (gl_scene->program() == 0) {
-                shader_type = "program";
-                details += " - Program creation failed";
-            }
-            
-            throw ShaderCompilationError(error_msg, shader_type, details);
-        }
-        
-        // Validate the result
-        if (!result) {
-            throw std::runtime_error("Rendering failed: createAndRenderABuffer returned null buffer");
-        }
-        
-        // Validate buffer properties
-        if (result->name == 0) {
-            throw std::runtime_error("Rendering failed: invalid OpenGL texture name in result buffer");
-        }
-        
-        // Copy pass dictionary to Python dict
-        for (const auto& pair : pass_dict) {
-            out_pass_dict[py::int_(pair.first)] = pair.second;
-        }
-        
-        return result;
-        
-    } catch (const ShaderCompilationError& e) {
-        // Re-throw compilation errors as-is
-        release_context_ref();
-        throw;
-    } catch (const std::exception& e) {
-        // Log the error for debugging
-        fprintf(stderr, "[pyvvisf] [ERROR] Exception in create_and_render_a_buffer: %s\n", e.what());
-        
-        // Attempt to clean up OpenGL state after error
-        try {
-            reset_gl_context_state();
-        } catch (...) {
-            // Ignore cleanup errors
-        }
-        
-        // Re-throw the original exception
-        release_context_ref();
-        throw;
-    } catch (...) {
-        // Catch any other exceptions
-        fprintf(stderr, "[pyvvisf] [ERROR] Unknown exception in create_and_render_a_buffer\n");
-        // Always release context reference before re-throwing
-        release_context_ref();
-        throw;
+    // Check for compilation errors by examining the GLScene's program status
+    const VVGL::GLScene* gl_scene = dynamic_cast<const VVGL::GLScene*>(&self);
+    if (gl_scene && !gl_scene->programReady()) {
+        throw ShaderCompilationError("Shader compilation failed", "unknown", "Program is not ready after compilation attempt");
     }
     
-    // Always release context reference on success
-    release_context_ref();
+    // Validate the result
+    if (!result) {
+        throw std::runtime_error("Rendering failed: createAndRenderABuffer returned null buffer");
+    }
+    
+    // Copy pass dictionary to Python dict
+    for (const auto& pair : pass_dict) {
+        out_pass_dict[py::int_(pair.first)] = pair.second;
+    }
+    
+    return result;
 }
 
-// Helper for render_to_buffer with context reference counting
+// Simple helper for render_to_buffer (no thread safety)
 static void pyvvisf_render_to_buffer(VVISF::ISFScene& self, const VVGL::GLBufferRef& target_buffer, const VVGL::Size& render_size, double render_time, py::dict out_pass_dict) {
-    // Prevent rendering during cleanup
-    if (g_cleanup_in_progress.load()) {
-        fprintf(stderr, "[pyvvisf] [ERROR] Cannot render during context cleanup\n");
-        throw std::runtime_error("Cannot render during context cleanup");
+    std::map<int32_t, VVGL::GLBufferRef> pass_dict;
+    self.renderToBuffer(target_buffer, render_size, render_time, &pass_dict);
+    for (const auto& pair : pass_dict) {
+        out_pass_dict[py::int_(pair.first)] = pair.second;
     }
-    
-    // Acquire context reference
-    acquire_context_ref();
-    fprintf(stderr, "[pyvvisf] [DEBUG] Starting render_to_buffer, ref count: %d\n", g_context_ref_count.load());
-    
-    try {
-        std::map<int32_t, VVGL::GLBufferRef> pass_dict;
-        self.renderToBuffer(target_buffer, render_size, render_time, &pass_dict);
-        for (const auto& pair : pass_dict) {
-            out_pass_dict[py::int_(pair.first)] = pair.second;
-        }
-    } catch (...) {
-        // Always release context reference before re-throwing
-        release_context_ref();
-        throw;
-    }
-    
-    // Always release context reference on success
-    release_context_ref();
 }
 
 PYBIND11_MODULE(vvisf_bindings, m) {
     m.doc() = "Python bindings for VVISF library - ISF shader rendering"; // Optional module docstring
     
-    // Exception classes
+    // Exception classes following pybind11 documentation
     py::register_exception<VVISFError>(m, "VVISFError");
     py::register_exception<ISFParseError>(m, "ISFParseError");
     py::register_exception<ShaderCompilationError>(m, "ShaderCompilationError");
@@ -1643,11 +1311,10 @@ PYBIND11_MODULE(vvisf_bindings, m) {
         .def("eval_buffer_dimensions_with_render_size", &VVISF::ISFDoc::evalBufferDimensionsWithRenderSize);
     
     // ISFDoc creation functions
-    m.def("CreateISFDocRef", &CreateISFDocRef_Wrapper, 
-          "Create an ISFDoc from file path",
-          py::arg("path"), py::arg("parent_scene") = nullptr, py::arg("throw_except") = true);
-    m.def("CreateISFDocRefWith", &CreateISFDocRefWith_Wrapper,
-          "Create an ISFDoc from shader strings",
+    m.def("CreateISFDocRef", &CreateISFDocRef_SafeWrapper,
+          "Create an ISFDoc from a file path with safe error handling");
+    m.def("CreateISFDocRefWith", &CreateISFDocRefWith_SafeWrapper,
+          "Create an ISFDoc from shader strings with safe error handling",
           py::arg("fs_contents"), py::arg("imports_dir") = "/", 
           py::arg("vs_contents") = std::string(VVISF::ISFVertPassthru_GL2),
           py::arg("parent_scene") = nullptr, py::arg("throw_except") = true);
@@ -1661,10 +1328,17 @@ PYBIND11_MODULE(vvisf_bindings, m) {
         .def("set_filter_input_buffer", &VVISF::ISFScene::setFilterInputBuffer)
         .def("set_buffer_for_input_image_key", &VVISF::ISFScene::setBufferForInputImageKey)
         .def("set_value_for_input_named", [](VVISF::ISFScene& self, const VVISF::ISFVal& value, const std::string& name) {
-            self.setValueForInputNamed(value, name);
+            try {
+                self.setValueForInputNamed(value, name);
+            } catch (const std::exception& e) {
+                throw ShaderRenderingError("Failed to set input '" + name + "': " + std::string(e.what()));
+            }
         })
         .def("get_value_for_input_named", [](VVISF::ISFScene& self, const std::string& name) {
             return self.valueForInputNamed(name);
+        })
+        .def("input_named", [](VVISF::ISFScene& self, const std::string& name) {
+            return self.inputNamed(name);
         })
         .def("set_size", &VVISF::ISFScene::setSize)
         .def("size", &VVISF::ISFScene::size)
@@ -1707,20 +1381,15 @@ PYBIND11_MODULE(vvisf_bindings, m) {
             }
         }, py::arg("target_buffer"), py::arg("render_size"), py::arg("render_time") = 0.0, py::arg("out_pass_dict") = py::dict())
         .def("cleanup", [](VVISF::ISFScene& self) {
-            // Enhanced cleanup for batch rendering
-            // We can't easily create a shared_ptr from a reference, so just call the cleanup directly
+            // Simple cleanup for batch rendering
             reset_gl_context_state();
             
-            // Perform buffer pool housekeeping to clean up idle textures
+            // Perform buffer pool housekeeping
             VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
             if (global_pool) {
                 global_pool->housekeeping();
-                fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool housekeeping completed\n");
             }
-            
-            // Force a small delay to allow GPU operations to complete
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }, "Enhanced cleanup for batch rendering operations")
+        }, "Simple cleanup for batch rendering operations")
         .def("__str__", [](const VVISF::ISFScene& self) {
             return "ISFScene()";
         });
@@ -1731,9 +1400,7 @@ PYBIND11_MODULE(vvisf_bindings, m) {
         if (!initialize_glfw_context()) {
             throw std::runtime_error("Failed to initialize GLFW context");
         }
-        fprintf(stderr, "[pyvvisf] [DEBUG] Before CreateISFSceneRef, ref count: %d\n", g_context_ref_count.load());
         auto scene = VVISF::CreateISFSceneRef();
-        fprintf(stderr, "[pyvvisf] [DEBUG] After CreateISFSceneRef, ref count: %d\n", g_context_ref_count.load());
         return scene;
     }, "Create an ISFScene");
     m.def("CreateISFSceneRefUsing", &VVISF::CreateISFSceneRefUsing, "Create an ISFScene with GL context");
@@ -1822,57 +1489,26 @@ PYBIND11_MODULE(vvisf_bindings, m) {
             if (!initialize_glfw_context()) {
                 throw std::runtime_error("Failed to initialize GLFW context");
             }
-            fprintf(stderr, "[pyvvisf] [DEBUG] Before GLBufferPool constructor, ref count: %d\n", g_context_ref_count.load());
             // Create a GLBufferPool that uses the current GLFW context
-            // We pass nullptr to let the pool use the current context instead of creating a new one
             auto pool = std::make_shared<VVGL::GLBufferPool>(nullptr);
-            fprintf(stderr, "[pyvvisf] [DEBUG] After GLBufferPool constructor, ref count: %d\n", g_context_ref_count.load());
             return pool;
         }))
         .def("create_buffer", [](std::shared_ptr<VVGL::GLBufferPool>& self, const VVGL::Size& size) {
             using namespace VVGL;
-            // Prevent operations during cleanup
-            if (g_cleanup_in_progress.load()) {
-                fprintf(stderr, "[pyvvisf] [ERROR] Cannot create buffer during context cleanup\n");
-                throw std::runtime_error("Cannot create buffer during context cleanup");
+            // Ensure GLFW context is current before creating buffer
+            if (!ensure_gl_context_current()) {
+                throw std::runtime_error("Failed to make OpenGL context current");
             }
-            
-            // Acquire context reference
-            acquire_context_ref();
-            fprintf(stderr, "[pyvvisf] [DEBUG] Starting buffer creation, ref count: %d\n", g_context_ref_count.load());
-            
-            try {
-                // Ensure GLFW context is current before creating buffer
-                if (!ensure_gl_context_current()) {
-                    throw std::runtime_error("Failed to make OpenGL context current");
-                }
-                GLBuffer::Descriptor desc;
-                desc.type = GLBuffer::Type_Tex;
-                desc.target = static_cast<GLBuffer::Target>(Target_2D);
-                desc.internalFormat = static_cast<GLBuffer::InternalFormat>(IF_RGBA);
-                desc.pixelFormat = static_cast<GLBuffer::PixelFormat>(PF_RGBA);
-                desc.pixelType = static_cast<GLBuffer::PixelType>(PT_UByte);
-                // Pass true to createInCurrentContext to use the GLFW context
-                return self->createBufferRef(desc, size, nullptr, VVGL::Size(), true);
-            } catch (...) {
-                // Always release context reference before re-throwing
-                release_context_ref();
-                throw;
-            }
-            
-            // Always release context reference on success
-            release_context_ref();
+            GLBuffer::Descriptor desc;
+            desc.type = GLBuffer::Type_Tex;
+            desc.target = static_cast<GLBuffer::Target>(Target_2D);
+            desc.internalFormat = static_cast<GLBuffer::InternalFormat>(IF_RGBA);
+            desc.pixelFormat = static_cast<GLBuffer::PixelFormat>(PF_RGBA);
+            desc.pixelType = static_cast<GLBuffer::PixelType>(PT_UByte);
+            // Pass true to createInCurrentContext to use the GLFW context
+            return self->createBufferRef(desc, size, nullptr, VVGL::Size(), true);
         }, py::arg("size"))
         .def("cleanup", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
-            // Prevent cleanup during other cleanup operations
-            if (g_cleanup_in_progress.load()) {
-                fprintf(stderr, "[pyvvisf] [WARN] Buffer pool cleanup blocked during context cleanup\n");
-                return;
-            }
-            
-            // Acquire context reference
-            acquire_context_ref();
-            
             try {
                 // Ensure GLFW context is current before cleanup
                 if (!ensure_gl_context_current()) {
@@ -1885,24 +1521,10 @@ PYBIND11_MODULE(vvisf_bindings, m) {
                 fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool cleanup completed\n");
             } catch (const std::exception& e) {
                 fprintf(stderr, "[pyvvisf] [ERROR] Exception during buffer pool cleanup: %s\n", e.what());
-                // Always release context reference before re-throwing
-                release_context_ref();
                 throw;
             }
-            
-            // Always release context reference on success
-            release_context_ref();
         }, "Clean up the buffer pool by removing idle and free buffers")
         .def("housekeeping", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
-            // Prevent operations during cleanup
-            if (g_cleanup_in_progress.load()) {
-                fprintf(stderr, "[pyvvisf] [WARN] Buffer pool housekeeping blocked during context cleanup\n");
-                return;
-            }
-            
-            // Acquire context reference
-            acquire_context_ref();
-            
             try {
                 if (!ensure_gl_context_current()) {
                     throw std::runtime_error("Failed to make OpenGL context current");
@@ -1911,24 +1533,10 @@ PYBIND11_MODULE(vvisf_bindings, m) {
                 fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool housekeeping completed\n");
             } catch (const std::exception& e) {
                 fprintf(stderr, "[pyvvisf] [ERROR] Exception during buffer pool housekeeping: %s\n", e.what());
-                // Always release context reference before re-throwing
-                release_context_ref();
                 throw;
             }
-            
-            // Always release context reference on success
-            release_context_ref();
         }, "Perform housekeeping to clean up idle buffers")
         .def("purge", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
-            // Prevent operations during cleanup
-            if (g_cleanup_in_progress.load()) {
-                fprintf(stderr, "[pyvvisf] [WARN] Buffer pool purge blocked during context cleanup\n");
-                return;
-            }
-            
-            // Acquire context reference
-            acquire_context_ref();
-            
             try {
                 if (!ensure_gl_context_current()) {
                     throw std::runtime_error("Failed to make OpenGL context current");
@@ -1937,20 +1545,11 @@ PYBIND11_MODULE(vvisf_bindings, m) {
                 fprintf(stderr, "[pyvvisf] [DEBUG] Buffer pool purge completed\n");
             } catch (const std::exception& e) {
                 fprintf(stderr, "[pyvvisf] [ERROR] Exception during buffer pool purge: %s\n", e.what());
-                // Always release context reference before re-throwing
-                release_context_ref();
                 throw;
             }
-            
-            // Always release context reference on success
-            release_context_ref();
         }, "Purge all free buffers from the pool")
         .def("force_cleanup", [](std::shared_ptr<VVGL::GLBufferPool>& self) {
-            // Force cleanup even during context cleanup (for emergency situations)
             fprintf(stderr, "[pyvvisf] [WARN] Force cleaning buffer pool\n");
-            
-            // Acquire context reference
-            acquire_context_ref();
             
             try {
                 if (!ensure_gl_context_current()) {
@@ -1969,9 +1568,6 @@ PYBIND11_MODULE(vvisf_bindings, m) {
             } catch (const std::exception& e) {
                 fprintf(stderr, "[pyvvisf] [ERROR] Exception during buffer pool force cleanup: %s\n", e.what());
             }
-            
-            // Always release context reference
-            release_context_ref();
         }, "Force cleanup of the buffer pool (emergency cleanup)");
 
     // Note: All buffer/image operations require the OpenGL context to be current (GLFW context). Provide helpers in Python for context management.
@@ -2039,6 +1635,163 @@ void safeDeleteProgram(GLuint& program) {
     if (program != 0 && glIsProgram(program)) {
         glDeleteProgram(program);
         program = 0;
+    }
+}
+
+// Simple OpenGL context guard (no thread safety)
+class OpenGLContextGuard {
+public:
+    OpenGLContextGuard() {
+        // Ensure context is current
+        if (!ensure_gl_context_current()) {
+            throw std::runtime_error("Failed to make OpenGL context current");
+        }
+    }
+    
+    ~OpenGLContextGuard() {
+        // No complex cleanup needed
+    }
+};
+
+// Simple error handling wrapper for ISF document creation (no thread safety)
+VVISF::ISFDocRef CreateISFDocRefWith_SafeWrapper(const std::string& fs_contents, 
+                                                const std::string& imports_dir,
+                                                const std::string& vs_contents,
+                                                VVISF::ISFScene* parent_scene,
+                                                const bool& throw_except) {
+    try {
+        // Create OpenGL context guard for safe operations
+        OpenGLContextGuard context_guard;
+        
+        // Attempt to create the ISF document
+        VVISF::ISFDocRef doc = VVISF::CreateISFDocRefWith(fs_contents, imports_dir, vs_contents, parent_scene, throw_except);
+        
+        // Validate the document was created successfully
+        if (!doc) {
+            throw std::runtime_error("Failed to create ISF document - returned null");
+        }
+        
+        return doc;
+        
+    } catch (const VVISF::ISFErr& err) {
+        std::string details = extract_isf_error_details(err);
+        
+        // Determine the type of error based on the error type and content
+        switch (err.type) {
+            case VVISF::ISFErrType_MalformedJSON:
+                // Check if this is an invalid input type error
+                if (err.specific.find("invalid") != std::string::npos || 
+                    err.specific.find("type") != std::string::npos ||
+                    err.general.find("input") != std::string::npos) {
+                    throw ShaderCompilationError("Invalid input type in shader file: " + imports_dir, "input", details);
+                }
+                throw ISFParseError("Malformed JSON in ISF file: " + imports_dir, details);
+            case VVISF::ISFErrType_ErrorParsingFS:
+                throw ShaderCompilationError("Error parsing fragment shader", "fragment", details);
+            case VVISF::ISFErrType_ErrorCompilingGLSL:
+                throw ShaderCompilationError("GLSL compilation error", "unknown", details);
+            case VVISF::ISFErrType_MissingResource:
+                throw ISFParseError("Missing resource: " + err.specific, details);
+            case VVISF::ISFErrType_ErrorLoading:
+                throw ISFParseError("Error loading resource: " + err.specific, details);
+            default:
+                // Check if this is an invalid input type error in the default case
+                if (err.specific.find("invalid") != std::string::npos || 
+                    err.specific.find("type") != std::string::npos ||
+                    err.general.find("input") != std::string::npos) {
+                    throw ShaderCompilationError("Invalid input type in shader file: " + imports_dir, "input", details);
+                }
+                throw ISFParseError("ISF error: " + err.general, details);
+        }
+    } catch (const std::exception& e) {
+        throw ISFParseError("Unexpected error during ISF parsing: " + std::string(e.what()));
+    } catch (...) {
+        throw ISFParseError("Unknown error during ISF parsing");
+    }
+}
+
+// Simple error handling wrapper for ISF document creation from file (no thread safety)
+VVISF::ISFDocRef CreateISFDocRef_SafeWrapper(const std::string& path,
+                                            VVISF::ISFScene* parent_scene,
+                                            const bool& throw_except) {
+    try {
+        // Create OpenGL context guard for safe operations
+        OpenGLContextGuard context_guard;
+        
+        // Attempt to create the ISF document
+        VVISF::ISFDocRef doc = VVISF::CreateISFDocRef(path, parent_scene, throw_except);
+        
+        // Validate the document was created successfully
+        if (!doc) {
+            throw std::runtime_error("Failed to create ISF document from file - returned null");
+        }
+        
+        return doc;
+        
+    } catch (const VVISF::ISFErr& err) {
+        std::string details = extract_isf_error_details(err);
+        
+        // Determine the type of error based on the error type and content
+        switch (err.type) {
+            case VVISF::ISFErrType_MalformedJSON:
+                // Check if this is an invalid input type error
+                if (err.specific.find("invalid") != std::string::npos || 
+                    err.specific.find("type") != std::string::npos ||
+                    err.general.find("input") != std::string::npos) {
+                    throw ShaderCompilationError("Invalid input type in shader file: " + path, "input", details);
+                }
+                throw ISFParseError("Malformed JSON in ISF file: " + path, details);
+            case VVISF::ISFErrType_ErrorParsingFS:
+                throw ShaderCompilationError("Error parsing fragment shader in file: " + path, "fragment", details);
+            case VVISF::ISFErrType_ErrorCompilingGLSL:
+                throw ShaderCompilationError("GLSL compilation error in file: " + path, "unknown", details);
+            case VVISF::ISFErrType_MissingResource:
+                throw ISFParseError("Missing resource: " + path, details);
+            case VVISF::ISFErrType_ErrorLoading:
+                throw ISFParseError("Error loading file: " + path, details);
+            default:
+                // Check if this is an invalid input type error in the default case
+                if (err.specific.find("invalid") != std::string::npos || 
+                    err.specific.find("type") != std::string::npos ||
+                    err.general.find("input") != std::string::npos) {
+                    throw ShaderCompilationError("Invalid input type in shader file: " + path, "input", details);
+                }
+                throw ISFParseError("ISF error in file " + path + ": " + err.general, details);
+        }
+    } catch (const std::exception& e) {
+        throw ISFParseError("Unexpected error loading ISF file " + path + ": " + std::string(e.what()));
+    } catch (...) {
+        throw ISFParseError("Unknown error loading ISF file " + path);
+    }
+}
+
+// Simple scene cleanup with resource management (no thread safety)
+void cleanup_scene_state_safe(VVISF::ISFSceneRef& scene) {
+    if (!scene) {
+        return;
+    }
+    
+    fprintf(stderr, "[pyvvisf] [DEBUG] Performing safe scene cleanup\n");
+    
+    try {
+        // Create OpenGL context guard for safe operations
+        OpenGLContextGuard context_guard;
+        
+        // Reset OpenGL context state
+        reset_gl_context_state();
+        
+        // Perform buffer pool housekeeping
+        VVGL::GLBufferPoolRef global_pool = VVGL::GetGlobalBufferPool();
+        if (global_pool) {
+            global_pool->housekeeping();
+        }
+        
+        fprintf(stderr, "[pyvvisf] [DEBUG] Safe scene cleanup completed\n");
+        
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Exception during safe scene cleanup: %s\n", e.what());
+    } catch (...) {
+        fprintf(stderr, "[pyvvisf] [ERROR] Unknown exception during safe scene cleanup\n");
     }
 }
 
