@@ -13,14 +13,14 @@ name = "pyvvisf"
 dynamic = ["version"]
 description = "Python bindings for VVISF (Vidvox Interactive Shader Format) using pybind11"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Jim Cortez", email = "gitstuff@jimcortez.com"}
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -34,11 +34,13 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "numpy>=1.21.0",
     "pillow>=9.0.0",
 ]
 
 [project.optional-dependencies]
+numpy = [
+    "numpy>=1.21.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",

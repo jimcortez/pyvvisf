@@ -30,8 +30,19 @@ class CMakeBuild(build_ext):
         # Check if we're building a wheel
         is_wheel_build = os.environ.get('VVISF_BUILD_TYPE') == 'wheel'
         
-        if is_wheel_build:
+        # Also check if we're in a pip build environment
+        is_pip_build = (
+            os.environ.get('PIP_BUILD_WHEEL') == '1' or
+            'pip' in os.environ.get('PIP_BUILD_ENV', '') or
+            any('pip' in arg for arg in sys.argv if isinstance(arg, str)) or
+            'bdist_wheel' in sys.argv or
+            'build' in sys.argv
+        )
+        
+        if is_wheel_build or is_pip_build:
             print("Building for wheel distribution...")
+            # Set the environment variable for CMake
+            os.environ['VVISF_BUILD_TYPE'] = 'wheel'
             self._build_for_wheel()
         else:
             print("Building for development...")
@@ -39,13 +50,18 @@ class CMakeBuild(build_ext):
     
     def _build_for_wheel(self):
         """Build process optimized for wheel creation."""
+        print("Starting wheel build process...")
+        
         # Ensure VVISF-GL is available
+        print("Ensuring VVISF-GL is available...")
         self._ensure_vvisf_gl()
         
         # Build VVISF libraries
+        print("Building VVISF libraries...")
         self._build_vvisf_libraries()
         
         # Build the extension
+        print("Building Python extension...")
         for ext in self.extensions:
             self.build_extension(ext)
     
@@ -75,17 +91,21 @@ class CMakeBuild(build_ext):
     def _ensure_vvisf_gl(self):
         """Ensure VVISF-GL submodule is available."""
         vvisf_gl_path = here / 'external' / 'VVISF-GL'
+        print(f"Checking for VVISF-GL at: {vvisf_gl_path}")
+        
         if not vvisf_gl_path.exists():
             print("Cloning VVISF-GL repository...")
             subprocess.check_call([
                 'git', 'clone', 'https://github.com/mrRay/VVISF-GL.git', 
                 str(vvisf_gl_path)
             ])
+        else:
+            print("VVISF-GL repository already exists")
         
         # Apply patches
         patches = [
-            'vvisf-glfw-support.patch',
-            'vvisf-architecture-support.patch'
+            'vvisf-architecture-support.patch',
+            'vvisf-glfw-support.patch'
         ]
         
         for patch_name in patches:
@@ -202,6 +222,10 @@ class CMakeBuild(build_ext):
         # Required for auto-detection of auxiliary "native" libs
         if not extdir.endswith(os.path.sep):
             extdir += os.path.sep
+        
+        # Ensure build directory exists
+        if not os.path.exists(self.build_temp):
+            os.makedirs(self.build_temp)
             
         cmake_args = [
             f'-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}',
@@ -230,8 +254,13 @@ class CMakeBuild(build_ext):
             raise RuntimeError(f"CMakeLists.txt not found in {cmake_lists_dir}")
             
         # Build the extension
+        print(f"Building extension in: {self.build_temp}")
+        print(f"CMake arguments: {cmake_args}")
+        
         try:
+            print("Running cmake configure...")
             subprocess.check_call(['cmake', cmake_lists_dir] + cmake_args, cwd=self.build_temp)
+            print("Running cmake build...")
             subprocess.check_call(['cmake', '--build', '.', '--config', 'Release'], cwd=self.build_temp)
         except subprocess.CalledProcessError as e:
             print(f"CMake build failed: {e}")
@@ -258,7 +287,6 @@ def main():
         classifiers=[
             "Development Status :: 3 - Alpha",
             "Intended Audience :: Developers",
-            "License :: OSI Approved :: MIT License",
             "Programming Language :: Python :: 3",
             "Programming Language :: Python :: 3.8",
             "Programming Language :: Python :: 3.9",

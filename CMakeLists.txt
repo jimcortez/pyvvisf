@@ -6,14 +6,15 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/VVISF-GL/README.md")
     if(BUILDING_WHEEL)
         message(FATAL_ERROR 
             "VVISF-GL not found during wheel build!\n"
-            "This should be handled by the setup.py build process."
+            "This should be handled by the setup.py build process.\n"
+            "Current directory: ${CMAKE_CURRENT_SOURCE_DIR}"
         )
     else()
-    message(FATAL_ERROR 
-        "VVISF-GL submodule not found!\n"
-        "Please run: git submodule update --init --recursive\n"
-        "Or run: ./scripts/setup.sh"
-    )
+        message(FATAL_ERROR 
+            "VVISF-GL submodule not found!\n"
+            "Please run: git submodule update --init --recursive\n"
+            "Or run: ./scripts/setup.sh"
+        )
     endif()
 endif()
 
@@ -182,10 +183,16 @@ if(pybind11_FOUND)
     target_compile_definitions(vvisf_bindings PRIVATE ${VVGL_SDK})
     target_link_libraries(vvisf_bindings PRIVATE VVISF VVGL ${PLATFORM_LIBS})
     
-    # Set output directory to src/pyvvisf for development
-    set_target_properties(vvisf_bindings PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/pyvvisf
-    )
+    # Set output directory - always use pyvvisf subdirectory
+    if(DEFINED CMAKE_LIBRARY_OUTPUT_DIRECTORY)
+        set_target_properties(vvisf_bindings PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/pyvvisf
+        )
+    else()
+        set_target_properties(vvisf_bindings PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/pyvvisf
+        )
+    endif()
 else()
     message(FATAL_ERROR "pybind11 not found, but is required for pyvvisf")
 endif() 

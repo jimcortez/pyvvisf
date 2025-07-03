@@ -353,7 +353,8 @@ pip list --outdated
 pip install -U black isort flake8 mypy pytest
 
 # Update runtime dependencies
-pip install -U numpy pillow
+pip install -U pillow
+# Optional: pip install -U numpy
 ```
 
 ## Getting Help

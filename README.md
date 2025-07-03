@@ -35,13 +35,53 @@ pip install -e .
 import pyvvisf
 from PIL import Image
 
-# Initialize GLFW context
-pyvvisf.initialize_glfw_context()
+# Use the context manager for automatic GLFW/OpenGL context management
+with pyvvisf.GLContextManager() as ctx:
+    # Create an ISF scene
+    scene = pyvvisf.CreateISFSceneRef()
+    
+    # Load an ISF shader
+    shader_content = """
+    /*{
+        "DESCRIPTION": "Simple color shader",
+        "CREDIT": "Example",
+        "CATEGORIES": ["Color Effect"],
+        "INPUTS": [
+            {
+                "NAME": "color",
+                "TYPE": "color",
+                "DEFAULT": [1.0, 0.0, 0.0, 1.0]
+            }
+        ]
+    }*/
+    
+    void main() {
+        gl_FragColor = INPUTS_color;
+    }
+    """
+    
+    # Create ISF document from shader content
+    doc = pyvvisf.CreateISFDocRefWith(shader_content)
+    scene.use_doc(doc)
+    
+    # Set shader inputs
+    scene.set_value_for_input_named(pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0), "color")
+    
+    # Render to a buffer
+    size = pyvvisf.Size(1920, 1080)
+    buffer = scene.create_and_render_a_buffer(size)
+    
+    # Convert to PIL Image
+    image = buffer.to_pil_image()
+    image.save("output.png")
+    
+    # Context is automatically cleaned up when exiting the block
+```
 
-# Create an ISF scene
-scene = pyvvisf.CreateISFSceneRef()
+```python
+import pyvvisf
+from PIL import Image
 
-# Load an ISF shader
 shader_content = """
 /*{
     "DESCRIPTION": "Simple color shader",
@@ -52,32 +92,39 @@ shader_content = """
             "NAME": "color",
             "TYPE": "color",
             "DEFAULT": [1.0, 0.0, 0.0, 1.0]
+        },
+        {
+            "NAME": "intensity",
+            "TYPE": "float",
+            "DEFAULT": 1.0,
+            "MIN": 0.0,
+            "MAX": 1.0
         }
     ]
 }*/
 
 void main() {
-    gl_FragColor = INPUTS_color;
+    gl_FragColor = color * intensity;
 }
 """
 
-# Create ISF document from shader content
-doc = pyvvisf.CreateISFDocRefWith(shader_content)
-scene.use_doc(doc)
+with pyvvisf.ISFRenderer(shader_content) as renderer:
+    renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
+    image = renderer.render_to_pil_image(1920, 1080)
+    image.save("output_green.png")
 
-# Set shader inputs
-scene.set_value_for_input_named(pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0), "color")
+    renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
+    image = renderer.render_to_pil_image(1920, 1080)
+    image.save("output_red.png")
 
-# Render to a buffer
-size = pyvvisf.Size(1920, 1080)
-buffer = scene.create_and_render_a_buffer(size)
+    renderer.set_inputs({
+        "color": pyvvisf.ISFColorVal(0.0, 0.0, 1.0, 1.0),
+        "intensity": pyvvisf.ISFFloatVal(0.5)
+    })
+    image = renderer.render_to_pil_image(1920, 1080)
+    image.save("output_blue_half_intense.png")
 
-# Convert to PIL Image
-image = buffer.to_pil_image()
-image.save("output.png")
 ```
-
-
 
 ## Platform Support
 
@@ -92,8 +139,10 @@ Python versions: 3.8, 3.9, 3.10, 3.11, 3.12
 ## Dependencies
 
 ### Runtime Dependencies
-- `numpy>=1.21.0`
 - `pillow>=9.0.0`
+
+### Optional Dependencies
+- `numpy>=1.21.0` - For numpy array integration (optional)
 
 ### System Dependencies
 - **Linux**: GLFW, GLEW, OpenGL development libraries
@@ -105,6 +154,7 @@ These are automatically handled when installing from wheels.
 ## Documentation
 
 - **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation
+- **[Context Manager Guide](docs/CONTEXT_MANAGER.md)** - Automatic GLFW/OpenGL context management
 - **[Building from Source](docs/BUILDING.md)** - Detailed build instructions
 - **[Development Guide](docs/DEVELOPMENT.md)** - Guide for contributors
 - **[Full Documentation](docs/README.md)** - Complete documentation index

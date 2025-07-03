@@ -113,7 +113,7 @@ cd ..
 
 # Verify build
 print_status "Verifying build..."
-if [ -f "src/pyvvisf/vvisf_bindings.cpython-*.so" ]; then
+if ls src/pyvvisf/vvisf_bindings.cpython-*.so 1> /dev/null 2>&1; then
     print_success "Python extension built successfully"
 else
     print_error "Python extension not found"
