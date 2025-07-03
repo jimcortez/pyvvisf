@@ -58,54 +58,17 @@ fi
 
 echo "Applying Linux support patches..."
 
-# Debug platform detection
-echo "Debug: Checking platform detection..."
-echo "Debug: uname output: $(uname)"
-echo "Debug: /etc/os-release content:"
-if [ -f /etc/os-release ]; then
-    cat /etc/os-release
+# Check if Linux patches are already applied
+if grep -q "lglfw -lGLEW -lGL" VVGL/Makefile && grep -q "lglfw -lGLEW -lGL" VVISF/Makefile; then
+    echo "✓ Linux patches already applied"
 else
-    echo "Debug: /etc/os-release not found"
-fi
-
-# Check if Linux section is empty and apply configuration if needed
-echo "Debug: Checking Linux section in VVGL Makefile..."
-grep -A 5 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile
-
-if grep -A 1 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile | grep -q "^else ifeq"; then
-    echo "Linux section is empty, applying Linux configuration..."
-    
-    # Create a temporary file with the Linux configuration
-    cat > /tmp/linux_config.txt << 'EOF'
-	CXX = g++
-	
-	CPPFLAGS := -Wall -g -std=c++11 -fPIC -O3
-	CPPFLAGS += -I./include/ -DVVGL_SDK_GLFW
-	# Add GLFW and GLEW include paths
-	CPPFLAGS += -I/usr/include
-	CPPFLAGS += -I/usr/local/include
-	CPPFLAGS += -I/opt/homebrew/include
-	OBJCPPFLAGS := $(CPPFLAGS)
-	
-	CPPFLAGS += -x c++
-	
-	LDFLAGS := -lstdc++ -shared -fPIC
-	# Add GLFW and GLEW libraries
-	LDFLAGS += -L/usr/lib -L/usr/local/lib -L/opt/homebrew/lib
-	LDFLAGS += -lglfw -lGLEW -lGL -lX11 -lXrandr -lXinerama -lXcursor -lm -ldl
-	LDFLAGS += -lpthread
-EOF
-    
-    # Apply to VVGL Makefile
-    sed -i '' '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVGL/Makefile
-    
-    # Apply to VVISF Makefile
-    sed -i '' '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVISF/Makefile
-    
-    rm /tmp/linux_config.txt
-    echo "✓ Linux configuration applied"
-else
-    echo "✓ Linux configuration already present"
+    # Apply the Linux patch
+    if patch -p1 < "$LINUX_PATCH_FILE"; then
+        echo "✓ Linux patches applied successfully"
+    else
+        echo "✗ Failed to apply Linux patches"
+        exit 1
+    fi
 fi
 
 # Build VVGL with GLFW support
