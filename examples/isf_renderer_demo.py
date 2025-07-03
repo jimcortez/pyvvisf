@@ -44,7 +44,7 @@ def main():
     }*/
     
     void main() {
-        gl_FragColor = color * intensity;
+        gl_FragColor = color * vec4(intensity, intensity, intensity, 1.0);
     }
     """
     

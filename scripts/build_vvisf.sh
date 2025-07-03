@@ -97,10 +97,10 @@ if grep -A 1 "else ifeq (\$(shell uname),Linux)" VVGL/Makefile | grep -q "^else 
 EOF
     
     # Apply to VVGL Makefile
-    sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVGL/Makefile
+    sed -i '' '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVGL/Makefile
     
     # Apply to VVISF Makefile
-    sed -i '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVISF/Makefile
+    sed -i '' '/else ifeq ($(shell uname),Linux)/r /tmp/linux_config.txt' VVISF/Makefile
     
     rm /tmp/linux_config.txt
     echo "✓ Linux configuration applied"

@@ -35,53 +35,6 @@ pip install -e .
 import pyvvisf
 from PIL import Image
 
-# Use the context manager for automatic GLFW/OpenGL context management
-with pyvvisf.GLContextManager() as ctx:
-    # Create an ISF scene
-    scene = pyvvisf.CreateISFSceneRef()
-    
-    # Load an ISF shader
-    shader_content = """
-    /*{
-        "DESCRIPTION": "Simple color shader",
-        "CREDIT": "Example",
-        "CATEGORIES": ["Color Effect"],
-        "INPUTS": [
-            {
-                "NAME": "color",
-                "TYPE": "color",
-                "DEFAULT": [1.0, 0.0, 0.0, 1.0]
-            }
-        ]
-    }*/
-    
-    void main() {
-        gl_FragColor = INPUTS_color;
-    }
-    """
-    
-    # Create ISF document from shader content
-    doc = pyvvisf.CreateISFDocRefWith(shader_content)
-    scene.use_doc(doc)
-    
-    # Set shader inputs
-    scene.set_value_for_input_named(pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0), "color")
-    
-    # Render to a buffer
-    size = pyvvisf.Size(1920, 1080)
-    buffer = scene.create_and_render_a_buffer(size)
-    
-    # Convert to PIL Image
-    image = buffer.to_pil_image()
-    image.save("output.png")
-    
-    # Context is automatically cleaned up when exiting the block
-```
-
-```python
-import pyvvisf
-from PIL import Image
-
 shader_content = """
 /*{
     "DESCRIPTION": "Simple color shader",
@@ -161,12 +114,7 @@ These are automatically handled when installing from wheels.
 
 ## Examples
 
-See the `examples/` directory for more usage examples:
-
-```bash
-# Run the basic usage example
-python examples/basic_usage.py
-```
+See the `examples/` directory for more usage examples.
 
 ## Contributing
 
@@ -183,6 +131,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Acknowledgments
 
-- [VVISF](https://isf.video/) - The Interactive Shader Format specification
 - [VVGL](https://github.com/mrRay/VVISF-GL) - The underlying C++ library
 - [pybind11](https://pybind11.readthedocs.io/) - Python binding framework 
