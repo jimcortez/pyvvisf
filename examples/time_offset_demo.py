@@ -9,6 +9,7 @@ from time-based shaders.
 
 import pyvvisf
 from PIL import Image
+from pathlib import Path
 
 # A simple animated shader that changes color over time
 shader_content = """
@@ -51,15 +52,14 @@ def main():
         time_offsets = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
         
         for i, time_offset in enumerate(time_offsets):
-            print(f"Rendering at time offset: {time_offset}s")
-            
-            # Render the shader at the specified time offset
-            image = renderer.render_to_pil_image(800, 600, time_offset=time_offset)
+            print(f"Rendering at {time_offset}s...")
+            buffer = renderer.render(800, 600, time_offset=time_offset)
+            image = buffer.to_pil_image()
             
             # Save the image
-            filename = f"time_offset_{time_offset}s.png"
-            image.save(filename)
-            print(f"Saved: {filename}")
+            output_path = Path(__file__).parent / f"output_time_{time_offset}s.png"
+            image.save(output_path)
+            print(f"✓ Saved image to: {output_path}")
         
         print("\nAll images saved! You should see different colors for each time offset.")
         print("The shader creates a smooth color animation that cycles through RGB values.")

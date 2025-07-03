@@ -63,22 +63,26 @@ void main() {
 
 with pyvvisf.ISFRenderer(shader_content) as renderer:
     renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
-    image = renderer.render_to_pil_image(1920, 1080)
+    buffer = renderer.render(1920, 1080)
+    image = buffer.to_pil_image()
     image.save("output_green.png")
 
     renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
-    image = renderer.render_to_pil_image(1920, 1080)
+    buffer = renderer.render(1920, 1080)
+    image = buffer.to_pil_image()
     image.save("output_red.png")
 
     renderer.set_inputs({
         "color": pyvvisf.ISFColorVal(0.0, 0.0, 1.0, 1.0),
         "intensity": pyvvisf.ISFFloatVal(0.5)
     })
-    image = renderer.render_to_pil_image(1920, 1080)
+    buffer = renderer.render(1920, 1080)
+    image = buffer.to_pil_image()
     image.save("output_blue_half_intense.png")
 
     # Render with time offset (e.g., 5 seconds into the animation)
-    image = renderer.render_to_pil_image(1920, 1080, time_offset=5.0)
+    buffer = renderer.render(1920, 1080, time_offset=5.0)
+    image = buffer.to_pil_image()
     image.save("output_5_seconds.png")
 
 ```

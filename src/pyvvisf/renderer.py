@@ -19,12 +19,13 @@ class ISFRenderer:
     
     This class provides a simplified interface for working with ISF shaders,
     automatically handling OpenGL context management and providing convenient
-    methods for setting shader inputs and rendering to images.
+    methods for setting shader inputs and rendering to buffers.
     
     Usage:
         with ISFRenderer(shader_content) as renderer:
             renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
-            image = renderer.render_to_pil_image(1920, 1080)
+            buffer = renderer.render(1920, 1080)
+            image = buffer.to_pil_image()
             image.save("output.png")
     """
     
@@ -184,45 +185,7 @@ class ISFRenderer:
         for name, value in inputs.items():
             self.set_input(name, value)
     
-    def render_to_pil_image(self, width, height, time_offset=0.0):
-        """
-        Render the shader to a PIL Image.
-        
-        Args:
-            width (int): Output image width
-            height (int): Output image height
-            time_offset (float, optional): Time offset in seconds to render the shader at.
-                                         Defaults to 0.0 (current time).
-            
-        Returns:
-            PIL.Image: Rendered image
-            
-        Raises:
-            ShaderRenderingError: If rendering fails
-        """
-        if not self._scene:
-            raise RuntimeError("No shader loaded. Context not entered?")
-        
-        try:
-            size = Size(width, height)
-            buffer = self._scene.create_and_render_a_buffer(size, time_offset)
-            
-            # Check for rendering errors
-            self._check_rendering_errors("buffer creation")
-            
-            # Convert to PIL Image
-            try:
-                return buffer.to_pil_image()
-            except Exception:
-                return buffer.create_pil_image()
-                
-        except Exception as e:
-            error_details = self._extract_error_details()
-            raise ShaderRenderingError(
-                f"Failed to render to PIL image: {str(e)}"
-            )
-    
-    def render_to_buffer(self, width, height, time_offset=0.0):
+    def render(self, width, height, time_offset=0.0):
         """
         Render the shader to a GLBuffer.
         
@@ -233,7 +196,7 @@ class ISFRenderer:
                                          Defaults to 0.0 (current time).
             
         Returns:
-            GLBuffer: Rendered buffer
+            GLBuffer: Rendered buffer that can be converted to PIL Image or numpy array
             
         Raises:
             ShaderRenderingError: If rendering fails

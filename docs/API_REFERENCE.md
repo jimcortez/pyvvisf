@@ -1,96 +1,10 @@
 # pyvvisf API Reference
 
-> **Note:** As of July 2024, all batch rendering and OpenGL context bugs have been fixed. All tests pass on all supported platforms. The API below is current and stable.
-
 This document provides a comprehensive reference for the pyvvisf Python bindings for VVISF.
 
 ## Core Classes
 
-### ISFScene
 
-The main class for rendering ISF shaders.
-
-```python
-import pyvvisf
-
-# Create a scene
-scene = pyvvisf.CreateISFSceneRef()
-
-# Use a document
-scene.use_doc(doc)
-
-# Set input values
-scene.set_value_for_input_named(value, "input_name")
-
-# Render to buffer
-buffer = scene.create_and_render_a_buffer(size)
-
-# Set buffer for image input
-scene.set_buffer_for_input_named(buffer, "image_input_name")
-```
-
-### ISFDoc
-
-Represents an ISF document/shader.
-
-```python
-# Create from shader content
-doc = pyvvisf.CreateISFDocRefWith(shader_content)
-
-# Access document properties
-name = doc.name()
-description = doc.description()
-credit = doc.credit()
-version = doc.vsn()
-categories = doc.categories()
-
-# Get inputs
-inputs = doc.inputs()
-for input_attr in inputs:
-    print(f"Input: {input_attr.name()}, Type: {input_attr.type()}")
-```
-
-### ISFAttr
-
-Represents shader attributes/inputs.
-
-```python
-# Access input properties
-input_name = attr.name()
-input_type = attr.type()
-input_description = attr.description()
-```
-
-### GLBuffer
-
-OpenGL buffer for image data.
-
-```python
-# Create buffer
-buffer = pyvvisf.CreateGLBufferRef()
-
-# Get buffer properties
-size = buffer.size
-name = buffer.name
-
-# Convert to PIL Image
-image = buffer.to_pil_image()
-
-# Create from PIL Image
-buffer = pyvvisf.GLBuffer.from_pil_image(pil_image)
-```
-
-### GLBufferPool
-
-Pool for managing GL buffers.
-
-```python
-# Create buffer pool
-pool = pyvvisf.GLBufferPool()
-
-# Create buffer from pool
-buffer = pool.create_buffer(size)
-```
 
 ### ISFRenderer
 
@@ -105,16 +19,18 @@ with pyvvisf.ISFRenderer(shader_content) as renderer:
     renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
     renderer.set_input("intensity", pyvvisf.ISFFloatVal(0.8))
     
-    # Render to PIL Image
-    image = renderer.render_to_pil_image(1920, 1080)
+    # Render to buffer and convert to PIL Image
+    buffer = renderer.render(1920, 1080)
+    image = buffer.to_pil_image()
     image.save("output.png")
     
     # Render with time offset (for animated shaders)
-    image = renderer.render_to_pil_image(1920, 1080, time_offset=5.0)
+    buffer = renderer.render(1920, 1080, time_offset=5.0)
+    image = buffer.to_pil_image()
     image.save("output_5s.png")
     
-    # Render to GLBuffer
-    buffer = renderer.render_to_buffer(1920, 1080, time_offset=2.5)
+    # Render to buffer (can be converted to PIL Image or numpy array)
+    buffer = renderer.render(1920, 1080, time_offset=2.5)
     
     # Set multiple inputs at once
     renderer.set_inputs({
@@ -130,8 +46,7 @@ with pyvvisf.ISFRenderer(shader_content) as renderer:
 
 #### Methods
 
-- `render_to_pil_image(width, height, time_offset=0.0)` - Render to PIL Image
-- `render_to_buffer(width, height, time_offset=0.0)` - Render to GLBuffer
+- `render(width, height, time_offset=0.0)` - Render to GLBuffer (can be converted to PIL Image or numpy array)
 - `set_input(name, value)` - Set a single input value
 - `set_inputs(inputs_dict)` - Set multiple input values
 - `get_shader_info()` - Get information about the loaded shader

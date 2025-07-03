@@ -63,25 +63,38 @@ def main():
             print(f"Description: {info['description']}")
             print(f"Inputs: {info['inputs']}")
         
-        # Render green image
-        image = renderer.render_to_pil_image(800, 600)
+        # Render the shader
+        print("Rendering shader...")
+        buffer = renderer.render(800, 600)
+        image = buffer.to_pil_image()
+        print(f"Rendered image size: {image.size}")
+        
+        # Save the image
         output_path = Path(__file__).parent / "output_green.png"
         image.save(output_path)
-        print(f"✓ Saved green image to: {output_path}")
+        print(f"Saved image to: {output_path}")
         
-        # Change color to red
+        # Change the color and render again
+        print("\nChanging color to red...")
         renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
-        image = renderer.render_to_pil_image(800, 600)
+        
+        buffer = renderer.render(800, 600)
+        image = buffer.to_pil_image()
+        
         output_path = Path(__file__).parent / "output_red.png"
         image.save(output_path)
-        print(f"✓ Saved red image to: {output_path}")
+        print(f"Saved red image to: {output_path}")
         
         # Set multiple inputs at once
+        print("\nSetting multiple inputs...")
         renderer.set_inputs({
             "color": pyvvisf.ISFColorVal(0.0, 0.0, 1.0, 1.0),  # Blue
-            "intensity": pyvvisf.ISFFloatVal(0.5)  # Half intensity
+            "intensity": pyvvisf.ISFFloatVal(0.7)  # 70% intensity
         })
-        image = renderer.render_to_pil_image(800, 600)
+        
+        buffer = renderer.render(800, 600)
+        image = buffer.to_pil_image()
+        
         output_path = Path(__file__).parent / "output_blue_half.png"
         image.save(output_path)
         print(f"✓ Saved blue half-intensity image to: {output_path}")

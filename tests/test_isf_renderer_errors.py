@@ -44,7 +44,8 @@ class TestISFRendererErrors:
         # This should not raise any exceptions
         with pyvvisf.ISFRenderer(shader_content) as renderer:
             # Test that we can render
-            image = renderer.render_to_pil_image(256, 256)
+            buffer = renderer.render(256, 256)
+            image = buffer.to_pil_image()
             assert image.size == (256, 256)
             assert image.mode == "RGBA"
     
@@ -112,7 +113,7 @@ class TestISFRendererErrors:
         
         with pytest.raises(ShaderCompilationError) as exc_info:
             with pyvvisf.ISFRenderer(shader_content) as renderer:
-                renderer.render_to_buffer(128, 128)
+                renderer.render(128, 128)
         
         # Check that the error message indicates a shader compilation failure
         assert "Shader compilation failed" in str(exc_info.value)
@@ -290,7 +291,8 @@ class TestISFRendererErrors:
             renderer.set_input("color2", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
             
             # Render should succeed
-            image = renderer.render_to_pil_image(256, 256)
+            buffer = renderer.render(256, 256)
+            image = buffer.to_pil_image()
             assert image.size == (256, 256)
             
             # Try to set invalid input - this might not raise an exception
@@ -323,7 +325,7 @@ class TestISFRendererErrors:
         with pyvvisf.ISFRenderer(failing_shader) as renderer:
             # Try to render - this might work on some GLSL versions
             try:
-                image = renderer.render_to_buffer(256, 256)
+                buffer = renderer.render(256, 256)
                 # If it works, that's fine too
             except ShaderRenderingError as exc_info:
                 # If it fails, that's also acceptable
@@ -353,12 +355,14 @@ class TestISFRendererErrors:
         
         with pyvvisf.ISFRenderer(shader_content) as renderer:
             # Normal rendering should work
-            image = renderer.render_to_pil_image(256, 256)
+            buffer = renderer.render(256, 256)
+            image = buffer.to_pil_image()
             assert image.size == (256, 256)
             
             # Try to render with invalid size (should still work but test error handling)
             try:
-                image = renderer.render_to_pil_image(0, 0)
+                buffer = renderer.render(0, 0)
+                image = buffer.to_pil_image()
                 # If it doesn't raise an error, that's fine too
             except ShaderRenderingError as e:
                 assert "render" in str(e).lower()
@@ -391,7 +395,8 @@ class TestISFRendererErrors:
                 with pyvvisf.ISFRenderer(shader_content) as renderer:
                     renderers.append(renderer)
                     # Use the renderer
-                    image = renderer.render_to_pil_image(128, 128)
+                    buffer = renderer.render(128, 128)
+                    image = buffer.to_pil_image()
                     assert image.size == (128, 128)
             except Exception as e:
                 # If there's an error, it should be a specific type
