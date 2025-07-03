@@ -66,6 +66,77 @@ size = pyvvisf.Size(width, height)
 rect = pyvvisf.Rect(x, y, width, height)
 ```
 
+## High-Level Interface
+
+### ISFRenderer
+
+The `ISFRenderer` class provides a convenient high-level interface for working with ISF shaders, including automatic OpenGL context management and input value coercion.
+
+```python
+import pyvvisf
+
+shader_content = """
+/*{
+    "DESCRIPTION": "Simple shader",
+    "INPUTS": [
+        {
+            "NAME": "color",
+            "TYPE": "color",
+            "DEFAULT": [1.0, 0.0, 0.0, 1.0]
+        },
+        {
+            "NAME": "intensity",
+            "TYPE": "float",
+            "DEFAULT": 1.0
+        }
+    ]
+}*/
+
+void main() {
+    gl_FragColor = color * intensity;
+}
+"""
+
+with pyvvisf.ISFRenderer(shader_content) as renderer:
+    # Auto-coercion: Python primitives are automatically converted
+    renderer.set_input("color", (0.0, 1.0, 0.0))  # RGB tuple -> ISFColorVal
+    renderer.set_input("intensity", 0.5)  # float -> ISFFloatVal
+    
+    buffer = renderer.render(1920, 1080)
+    image = buffer.to_pil_image()
+    image.save("output.png")
+```
+
+#### Auto-Coercion
+
+The `ISFRenderer` automatically converts Python primitives to the appropriate ISF value types:
+
+- **Numbers**: `bool`, `int`, `float` → `ISFBoolVal`, `ISFLongVal`, `ISFFloatVal`
+- **Tuples/Lists**: 
+  - 2 numbers → `ISFPoint2DVal`
+  - 3 numbers → `ISFColorVal` (RGB + alpha=1.0)
+  - 4 numbers → `ISFColorVal` (RGBA)
+
+```python
+# These are equivalent:
+renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
+renderer.set_input("color", (1.0, 0.0, 0.0, 1.0))
+
+renderer.set_input("intensity", pyvvisf.ISFFloatVal(0.5))
+renderer.set_input("intensity", 0.5)
+
+# RGB to RGBA conversion:
+renderer.set_input("color", (1.0, 0.0, 0.0))  # Automatically adds alpha=1.0
+```
+
+#### Methods
+
+- `set_input(name, value)`: Set a single input value
+- `set_inputs(inputs_dict)`: Set multiple input values at once
+- `render(width, height, time_offset=0.0)`: Render the shader to a buffer
+- `get_shader_info()`: Get information about the loaded shader
+- `get_current_inputs()`: Get currently set input values
+
 ## Value Types
 
 ### ISFBoolVal

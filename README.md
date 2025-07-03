@@ -62,19 +62,19 @@ void main() {
 """
 
 with pyvvisf.ISFRenderer(shader_content) as renderer:
-    renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
+    renderer.set_input("color", (0.0, 1.0, 0.0, 1.0))
     buffer = renderer.render(1920, 1080)
     image = buffer.to_pil_image()
     image.save("output_green.png")
 
-    renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
+    renderer.set_input("color", (1.0, 0.0, 0.0)) 
     buffer = renderer.render(1920, 1080)
     image = buffer.to_pil_image()
     image.save("output_red.png")
 
     renderer.set_inputs({
-        "color": pyvvisf.ISFColorVal(0.0, 0.0, 1.0, 1.0),
-        "intensity": pyvvisf.ISFFloatVal(0.5)
+        "color": (0.0, 1.0, 0.0, 1.0),
+        "intensity": 0.5  # Float -> ISFFloatVal
     })
     buffer = renderer.render(1920, 1080)
     image = buffer.to_pil_image()

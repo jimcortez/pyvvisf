@@ -12,6 +12,90 @@ ISFParseError = _vvisf.ISFParseError
 ShaderCompilationError = _vvisf.ShaderCompilationError
 ShaderRenderingError = _vvisf.ShaderRenderingError
 
+# Import ISF value creation functions
+ISFBoolVal = _vvisf.ISFBoolVal
+ISFLongVal = _vvisf.ISFLongVal
+ISFFloatVal = _vvisf.ISFFloatVal
+ISFPoint2DVal = _vvisf.ISFPoint2DVal
+ISFColorVal = _vvisf.ISFColorVal
+
+
+def _coerce_to_isf_value(value, expected_type):
+    """
+    Coerce a Python primitive to an ISF value based on the expected type.
+    
+    Args:
+        value: Python primitive (number, tuple, list, string, bool)
+        expected_type: ISFValType enum value
+        
+    Returns:
+        ISF value object of the appropriate type
+        
+    Raises:
+        ValueError: If the value cannot be coerced to the expected type
+    """
+    # If it's already an ISF value, return it
+    if hasattr(value, 'type') and callable(value.type):
+        return value
+    
+    # Handle different expected types
+    if expected_type == _vvisf.ISFValType_Bool:
+        if isinstance(value, bool):
+            return ISFBoolVal(value)
+        elif isinstance(value, (int, float)):
+            return ISFBoolVal(bool(value))
+        else:
+            raise ValueError(f"Cannot convert {type(value).__name__} to boolean")
+    
+    elif expected_type == _vvisf.ISFValType_Long:
+        if isinstance(value, int):
+            return ISFLongVal(value)
+        elif isinstance(value, float):
+            return ISFLongVal(int(value))
+        else:
+            raise ValueError(f"Cannot convert {type(value).__name__} to long")
+    
+    elif expected_type == _vvisf.ISFValType_Float:
+        if isinstance(value, (int, float)):
+            return ISFFloatVal(float(value))
+        else:
+            raise ValueError(f"Cannot convert {type(value).__name__} to float")
+    
+    elif expected_type == _vvisf.ISFValType_Point2D:
+        if isinstance(value, (tuple, list)) and len(value) == 2:
+            try:
+                x, y = float(value[0]), float(value[1])
+                return ISFPoint2DVal(x, y)
+            except (ValueError, TypeError):
+                raise ValueError(f"Cannot convert {value} to Point2D - values must be numbers")
+        else:
+            raise ValueError(f"Cannot convert {type(value).__name__} to Point2D - expected tuple/list with 2 numbers")
+    
+    elif expected_type == _vvisf.ISFValType_Color:
+        if isinstance(value, (tuple, list)):
+            if len(value) == 3:
+                # RGB - add alpha = 1.0
+                try:
+                    r, g, b = float(value[0]), float(value[1]), float(value[2])
+                    return ISFColorVal(r, g, b, 1.0)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Cannot convert {value} to Color - values must be numbers")
+            elif len(value) == 4:
+                # RGBA
+                try:
+                    r, g, b, a = float(value[0]), float(value[1]), float(value[2]), float(value[3])
+                    return ISFColorVal(r, g, b, a)
+                except (ValueError, TypeError):
+                    raise ValueError(f"Cannot convert {value} to Color - values must be numbers")
+            else:
+                raise ValueError(f"Cannot convert {value} to Color - expected 3 or 4 numbers")
+        else:
+            raise ValueError(f"Cannot convert {type(value).__name__} to Color - expected tuple/list with 3 or 4 numbers")
+    
+    else:
+        # For other types (Image, Audio, etc.), we can't auto-coerce
+        raise ValueError(f"Auto-coercion not supported for type {expected_type}")
+
 
 class ISFRenderer:
     """
@@ -151,7 +235,11 @@ class ISFRenderer:
         
         Args:
             name (str): Input name
-            value: ISF value object (e.g., ISFColorVal, ISFFloatVal, etc.)
+            value: ISF value object (e.g., ISFColorVal, ISFFloatVal, etc.) or Python primitive
+                  Python primitives will be automatically coerced to the appropriate ISF type:
+                  - bool, int, float -> ISFBoolVal, ISFLongVal, ISFFloatVal
+                  - tuple/list with 2 numbers -> ISFPoint2DVal
+                  - tuple/list with 3-4 numbers -> ISFColorVal (3 = RGB+alpha=1.0, 4 = RGBA)
         """
         if not self._scene:
             raise RuntimeError("No shader loaded. Context not entered?")
@@ -164,8 +252,16 @@ class ISFRenderer:
             )
         
         try:
-            self._scene.set_value_for_input_named(value, name)
-            self._current_inputs[name] = value
+            # Auto-coerce Python primitives to ISF values
+            expected_type = input_attr.type()
+            isf_value = _coerce_to_isf_value(value, expected_type)
+            
+            self._scene.set_value_for_input_named(isf_value, name)
+            self._current_inputs[name] = isf_value
+        except ValueError as e:
+            raise ShaderRenderingError(
+                f"Failed to set input '{name}': {str(e)}"
+            )
         except Exception as e:
             raise ShaderRenderingError(
                 f"Failed to set input '{name}': {str(e)}"
@@ -177,7 +273,8 @@ class ISFRenderer:
         
         Args:
             inputs (dict): Dictionary of input values to set
-                          Keys are input names, values are ISF value objects
+                          Keys are input names, values are ISF value objects or Python primitives
+                          Python primitives will be automatically coerced to appropriate ISF types
         """
         if not self._scene:
             raise RuntimeError("No shader loaded. Context not entered?")
