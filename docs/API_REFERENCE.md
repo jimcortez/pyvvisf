@@ -92,6 +92,53 @@ pool = pyvvisf.GLBufferPool()
 buffer = pool.create_buffer(size)
 ```
 
+### ISFRenderer
+
+High-level convenience class for rendering ISF shaders with automatic OpenGL context management.
+
+```python
+import pyvvisf
+
+# Create renderer with shader content
+with pyvvisf.ISFRenderer(shader_content) as renderer:
+    # Set shader inputs
+    renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
+    renderer.set_input("intensity", pyvvisf.ISFFloatVal(0.8))
+    
+    # Render to PIL Image
+    image = renderer.render_to_pil_image(1920, 1080)
+    image.save("output.png")
+    
+    # Render with time offset (for animated shaders)
+    image = renderer.render_to_pil_image(1920, 1080, time_offset=5.0)
+    image.save("output_5s.png")
+    
+    # Render to GLBuffer
+    buffer = renderer.render_to_buffer(1920, 1080, time_offset=2.5)
+    
+    # Set multiple inputs at once
+    renderer.set_inputs({
+        "color": pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0),
+        "speed": pyvvisf.ISFFloatVal(1.5)
+    })
+    
+    # Get shader information
+    info = renderer.get_shader_info()
+    print(f"Shader: {info['name']}")
+    print(f"Inputs: {info['inputs']}")
+```
+
+#### Methods
+
+- `render_to_pil_image(width, height, time_offset=0.0)` - Render to PIL Image
+- `render_to_buffer(width, height, time_offset=0.0)` - Render to GLBuffer
+- `set_input(name, value)` - Set a single input value
+- `set_inputs(inputs_dict)` - Set multiple input values
+- `get_shader_info()` - Get information about the loaded shader
+- `get_current_inputs()` - Get currently set input values
+- `check_errors(operation_name)` - Check for OpenGL errors
+- `is_valid()` - Check if renderer is in valid state
+
 ### Size and Rect
 
 Utility classes for dimensions and rectangles.

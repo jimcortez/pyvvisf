@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""
+Test time offset functionality in pyvvisf.
+"""
+
+import pytest
+import pyvvisf
+from PIL import Image
+import numpy as np
+
+# Simple animated shader for testing
+TEST_SHADER = """
+/*{
+    "DESCRIPTION": "Time-based test shader",
+    "CREDIT": "Test",
+    "CATEGORIES": ["Test"],
+    "INPUTS": []
+}*/
+
+void main() {
+    // Create a simple time-based pattern
+    float time = TIME;
+    vec2 uv = gl_FragCoord.xy / RENDERSIZE.xy;
+    
+    // Create a moving gradient based on time
+    float gradient = sin(uv.x * 10.0 + time) * cos(uv.y * 10.0 + time * 0.5);
+    
+    // Create different colors for different time ranges
+    vec3 color;
+    if (time < 2.0) {
+        color = vec3(1.0, 0.0, 0.0); // Red for 0-2s
+    } else if (time < 4.0) {
+        color = vec3(0.0, 1.0, 0.0); // Green for 2-4s
+    } else if (time < 6.0) {
+        color = vec3(0.0, 0.0, 1.0); // Blue for 4-6s
+    } else {
+        color = vec3(1.0, 1.0, 0.0); // Yellow for 6s+
+    }
+    
+    gl_FragColor = vec4(color * (0.5 + 0.5 * gradient), 1.0);
+}
+"""
+
+def test_time_offset_basic():
+    """Test basic time offset functionality."""
+    with pyvvisf.ISFRenderer(TEST_SHADER) as renderer:
+        # Render at different time offsets
+        img_0s = renderer.render_to_pil_image(100, 100, time_offset=0.0)
+        img_3s = renderer.render_to_pil_image(100, 100, time_offset=3.0)
+        img_5s = renderer.render_to_pil_image(100, 100, time_offset=5.0)
+        img_7s = renderer.render_to_pil_image(100, 100, time_offset=7.0)
+        
+        # Convert to numpy arrays for comparison
+        arr_0s = np.array(img_0s)
+        arr_3s = np.array(img_3s)
+        arr_5s = np.array(img_5s)
+        arr_7s = np.array(img_7s)
+        
+        # Check that images are different (different time offsets produce different results)
+        assert not np.array_equal(arr_0s, arr_3s), "Images at 0s and 3s should be different"
+        assert not np.array_equal(arr_3s, arr_5s), "Images at 3s and 5s should be different"
+        assert not np.array_equal(arr_5s, arr_7s), "Images at 5s and 7s should be different"
+        
+        # Check that images have the expected dimensions
+        assert arr_0s.shape == (100, 100, 4), f"Expected shape (100, 100, 4), got {arr_0s.shape}"
+        assert arr_3s.shape == (100, 100, 4), f"Expected shape (100, 100, 4), got {arr_3s.shape}"
+
+def test_time_offset_default():
+    """Test that default time_offset=0.0 works correctly."""
+    with pyvvisf.ISFRenderer(TEST_SHADER) as renderer:
+        # Render with explicit 0.0 and default (should be the same)
+        img_explicit = renderer.render_to_pil_image(50, 50, time_offset=0.0)
+        img_default = renderer.render_to_pil_image(50, 50)  # Default time_offset=0.0
+        
+        # Convert to numpy arrays
+        arr_explicit = np.array(img_explicit)
+        arr_default = np.array(img_default)
+        
+        # Should be identical
+        assert np.array_equal(arr_explicit, arr_default), "Default and explicit time_offset=0.0 should be identical"
+
+def test_time_offset_buffer():
+    """Test time offset with render_to_buffer method."""
+    with pyvvisf.ISFRenderer(TEST_SHADER) as renderer:
+        # Render to buffer with different time offsets
+        buffer_0s = renderer.render_to_buffer(64, 64, time_offset=0.0)
+        buffer_4s = renderer.render_to_buffer(64, 64, time_offset=4.0)
+        
+        # Convert buffers to PIL images
+        img_0s = buffer_0s.to_pil_image()
+        img_4s = buffer_4s.to_pil_image()
+        
+        # Convert to numpy arrays
+        arr_0s = np.array(img_0s)
+        arr_4s = np.array(img_4s)
+        
+        # Should be different due to different time offsets
+        assert not np.array_equal(arr_0s, arr_4s), "Buffers at different time offsets should be different"
+        
+        # Check dimensions
+        assert arr_0s.shape == (64, 64, 4), f"Expected shape (64, 64, 4), got {arr_0s.shape}"
+
+def test_time_offset_negative():
+    """Test negative time offset values."""
+    with pyvvisf.ISFRenderer(TEST_SHADER) as renderer:
+        # Render with negative time offset
+        img_neg = renderer.render_to_pil_image(32, 32, time_offset=-1.0)
+        img_zero = renderer.render_to_pil_image(32, 32, time_offset=0.0)
+        
+        # Convert to numpy arrays
+        arr_neg = np.array(img_neg)
+        arr_zero = np.array(img_zero)
+        
+        # Should be different (negative time should produce different result)
+        assert not np.array_equal(arr_neg, arr_zero), "Negative time offset should produce different result"
+
+def test_time_offset_large():
+    """Test large time offset values."""
+    with pyvvisf.ISFRenderer(TEST_SHADER) as renderer:
+        # Render with large time offset
+        img_large = renderer.render_to_pil_image(32, 32, time_offset=100.0)
+        
+        # Convert to numpy array
+        arr_large = np.array(img_large)
+        
+        # Should have correct dimensions
+        assert arr_large.shape == (32, 32, 4), f"Expected shape (32, 32, 4), got {arr_large.shape}"
+        
+        # Should not be all zeros or all ones (should have some variation)
+        assert not np.all(arr_large == 0), "Image should not be all zeros"
+        assert not np.all(arr_large == 255), "Image should not be all ones"
+
+if __name__ == "__main__":
+    # Run tests
+    test_time_offset_basic()
+    test_time_offset_default()
+    test_time_offset_buffer()
+    test_time_offset_negative()
+    test_time_offset_large()
+    print("All time offset tests passed!") 

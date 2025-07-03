@@ -184,13 +184,15 @@ class ISFRenderer:
         for name, value in inputs.items():
             self.set_input(name, value)
     
-    def render_to_pil_image(self, width, height):
+    def render_to_pil_image(self, width, height, time_offset=0.0):
         """
         Render the shader to a PIL Image.
         
         Args:
             width (int): Output image width
             height (int): Output image height
+            time_offset (float, optional): Time offset in seconds to render the shader at.
+                                         Defaults to 0.0 (current time).
             
         Returns:
             PIL.Image: Rendered image
@@ -203,7 +205,7 @@ class ISFRenderer:
         
         try:
             size = Size(width, height)
-            buffer = self._scene.create_and_render_a_buffer(size)
+            buffer = self._scene.create_and_render_a_buffer(size, time_offset)
             
             # Check for rendering errors
             self._check_rendering_errors("buffer creation")
@@ -220,13 +222,15 @@ class ISFRenderer:
                 f"Failed to render to PIL image: {str(e)}"
             )
     
-    def render_to_buffer(self, width, height):
+    def render_to_buffer(self, width, height, time_offset=0.0):
         """
         Render the shader to a GLBuffer.
         
         Args:
             width (int): Output buffer width
             height (int): Output buffer height
+            time_offset (float, optional): Time offset in seconds to render the shader at.
+                                         Defaults to 0.0 (current time).
             
         Returns:
             GLBuffer: Rendered buffer
@@ -239,7 +243,7 @@ class ISFRenderer:
         
         try:
             size = Size(width, height)
-            buffer = self._scene.create_and_render_a_buffer(size)
+            buffer = self._scene.create_and_render_a_buffer(size, time_offset)
             
             # Check for rendering errors
             self._check_rendering_errors("buffer creation")

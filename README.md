@@ -77,6 +77,10 @@ with pyvvisf.ISFRenderer(shader_content) as renderer:
     image = renderer.render_to_pil_image(1920, 1080)
     image.save("output_blue_half_intense.png")
 
+    # Render with time offset (e.g., 5 seconds into the animation)
+    image = renderer.render_to_pil_image(1920, 1080, time_offset=5.0)
+    image.save("output_5_seconds.png")
+
 ```
 
 ## Platform Support
