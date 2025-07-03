@@ -1,4 +1,5 @@
 """High-level ISF shader rendering interface for pyvvisf."""
+import pprint
 
 from . import vvisf_bindings as _vvisf
 from .context import GLContextManager
@@ -190,7 +191,8 @@ class ISFRenderer:
         except Exception as e:
             # Extract detailed error information
             error_details = self._extract_error_details()
-            raise ShaderCompilationError(f"Shader compilation failed: {str(e)}")
+            details_str = '\n' + pprint.pformat(error_details) if error_details else ''
+            raise ShaderCompilationError(f"Shader compilation failed: {str(e)}{details_str}")
     
     def _extract_error_details(self):
         """Extract detailed error information from the scene."""
@@ -226,7 +228,7 @@ class ISFRenderer:
         except Exception as e:
             error_details = self._extract_error_details()
             raise ShaderRenderingError(
-                f"Rendering failed during {operation_name}: {str(e)}"
+                f"Rendering failed during {operation_name}: {str(e)} | {error_details}"
             )
     
     def set_input(self, name, value):
@@ -312,9 +314,8 @@ class ISFRenderer:
             
         except Exception as e:
             error_details = self._extract_error_details()
-            raise ShaderRenderingError(
-                f"Failed to render to buffer: {str(e)}"
-            )
+            details_str = '\n' + pprint.pformat(error_details) if error_details else ''
+            raise ShaderRenderingError(f"Failed to render to buffer: {str(e)}{details_str}")
     
     def get_shader_info(self):
         """
@@ -357,9 +358,49 @@ class ISFRenderer:
     
     def is_valid(self):
         """
-        Check if the renderer is in a valid state.
+        Check if the renderer is in a valid state and the shader can be rendered.
+        
+        This method performs actual validation by attempting a test render to ensure
+        the shader compiles and can be executed successfully. This catches issues
+        like non-constant loop conditions that should fail according to the ISF specification.
         
         Returns:
-            bool: True if the renderer is valid and ready to render
+            bool: True if the renderer is valid and the shader can be rendered
         """
-        return (self._context_manager is not None and self._scene is not None) 
+        # Basic state checks
+        if self._context_manager is None or self._scene is None:
+            return False
+        
+        # Check if the scene has a valid document
+        doc = self._scene.doc()
+        if not doc:
+            return False
+        
+        # Perform actual validation by attempting a test render
+        try:
+            # Try to render a minimal test frame to trigger compilation and catch errors
+            size = Size(1, 1)  # Minimal size for testing
+            self._scene.create_and_render_a_buffer(size)
+            
+            # Check for any OpenGL errors that might have occurred
+            self._check_rendering_errors("validation test render")
+            
+            return True
+            
+        except Exception as e:
+            # If any exception occurs during test rendering, the shader is not valid
+            # This includes ShaderCompilationError, ShaderRenderingError, etc.
+            return False 
+    
+    def get_error_log(self):
+        """
+        Get the shader compilation and linking error log (if any) from the underlying scene.
+        Returns:
+            dict: Error log dictionary from the OpenGL driver and VVISF library, or an empty dict if none.
+        """
+        if not self._scene:
+            return {}
+        try:
+            return _vvisf.get_error_dict(self._scene)
+        except Exception:
+            return {} 
