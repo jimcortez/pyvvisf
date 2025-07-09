@@ -1,9 +1,9 @@
 """Pure Python ISF shader renderer with PyOpenGL and json5."""
 
-from .core.renderer import ISFRenderer
-from .core.parser import ISFParser, ISFMetadata
-from .core.types import ISFColor, ISFPoint2D, ISFValue
-from .core.errors import ISFError, ISFParseError, ShaderCompilationError, RenderingError
+from .renderer import ISFRenderer
+from .parser import ISFParser, ISFMetadata
+from .types import ISFColor, ISFPoint2D, ISFValue
+from .errors import ISFError, ISFParseError, ShaderCompilationError, RenderingError
 
 # Version info
 from ._version import __version__

@@ -1,406 +1,689 @@
-"""High-level ISF shader rendering interface for pyvvisf."""
-import pprint
+"""ISF shader renderer using PyOpenGL and pyglfw."""
 
-from . import vvisf_bindings as _vvisf
-from .context import GLContextManager
+import glfw
+import numpy as np
+import ctypes
+from OpenGL.GL import *
+from typing import Dict, Any, Optional
+import logging
 
-# Import the classes and functions we need
-Size = _vvisf.Size
-CreateISFDocRefWith = _vvisf.CreateISFDocRefWith
+from .parser import ISFParser, ISFMetadata
+from .types import ISFValue, ISFColor, ISFPoint2D
+from .errors import (
+    ISFError, ISFParseError, ShaderCompilationError, 
+    RenderingError, ContextError
+)
 
-# Import exception classes
-ISFParseError = _vvisf.ISFParseError
-ShaderCompilationError = _vvisf.ShaderCompilationError
-ShaderRenderingError = _vvisf.ShaderRenderingError
+class ShaderValidationError(ShaderCompilationError):
+    """Raised when shader validation fails due to empty or invalid content."""
+    pass
 
-# Import ISF value creation functions
-ISFBoolVal = _vvisf.ISFBoolVal
-ISFLongVal = _vvisf.ISFLongVal
-ISFFloatVal = _vvisf.ISFFloatVal
-ISFPoint2DVal = _vvisf.ISFPoint2DVal
-ISFColorVal = _vvisf.ISFColorVal
+from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
-def _coerce_to_isf_value(value, expected_type):
-    """
-    Coerce a Python primitive to an ISF value based on the expected type.
+class ShaderManager:
+    """Manages OpenGL shader compilation and linking."""
     
-    Args:
-        value: Python primitive (number, tuple, list, string, bool)
-        expected_type: ISFValType enum value
+    expected_input_uniforms: list[str] = []
+    def __init__(self):
+        self.program = None
+        self.vertex_shader = None
+        self.fragment_shader = None
+        self.uniform_locations = {}
+    
+    def compile_shader(self, source: str, shader_type: int) -> int:
+        """Compile GLSL shader with detailed error reporting."""
+        shader = glCreateShader(shader_type)
+        glShaderSource(shader, source)
+        glCompileShader(shader)
         
-    Returns:
-        ISF value object of the appropriate type
+        # Check compilation status
+        if not glGetShaderiv(shader, GL_COMPILE_STATUS):
+            error_log = glGetShaderInfoLog(shader).decode('utf-8')
+            glDeleteShader(shader)
+            raise ShaderCompilationError(
+                f"Shader compilation failed:\n{error_log}",
+                shader_source=source,
+                shader_type=self._shader_type_name(shader_type)
+            )
         
-    Raises:
-        ValueError: If the value cannot be coerced to the expected type
-    """
-    # If it's already an ISF value, return it
-    if hasattr(value, 'type') and callable(value.type):
-        return value
+        return shader
     
-    # Handle different expected types
-    if expected_type == _vvisf.ISFValType_Bool:
-        if isinstance(value, bool):
-            return ISFBoolVal(value)
-        elif isinstance(value, (int, float)):
-            return ISFBoolVal(bool(value))
-        else:
-            raise ValueError(f"Cannot convert {type(value).__name__} to boolean")
+    def create_program(self, vertex_source: str, fragment_source: str) -> int:
+        """Create and link shader program."""
+        try:
+            # Compile shaders
+            self.vertex_shader = self.compile_shader(vertex_source, GL_VERTEX_SHADER)
+            self.fragment_shader = self.compile_shader(fragment_source, GL_FRAGMENT_SHADER)
+            
+            # Create and link program
+            self.program = glCreateProgram()
+            glAttachShader(self.program, self.vertex_shader)
+            glAttachShader(self.program, self.fragment_shader)
+            glLinkProgram(self.program)
+            
+            # Check linking status
+            if not glGetProgramiv(self.program, GL_LINK_STATUS):
+                error_log = glGetProgramInfoLog(self.program).decode('utf-8')
+                raise ShaderCompilationError(
+                    f"Shader program linking failed:\n{error_log}",
+                    shader_source=f"Vertex:\n{vertex_source}\n\nFragment:\n{fragment_source}"
+                )
+            
+            # Bind the program before caching uniform locations
+            glUseProgram(self.program)
+            # Cache uniform locations
+            self._cache_uniform_locations()
+            
+            return self.program
+            
+        except Exception as e:
+            self.cleanup()
+            raise e
     
-    elif expected_type == _vvisf.ISFValType_Long:
-        if isinstance(value, int):
-            return ISFLongVal(value)
-        elif isinstance(value, float):
-            return ISFLongVal(int(value))
-        else:
-            raise ValueError(f"Cannot convert {type(value).__name__} to long")
-    
-    elif expected_type == _vvisf.ISFValType_Float:
-        if isinstance(value, (int, float)):
-            return ISFFloatVal(float(value))
-        else:
-            raise ValueError(f"Cannot convert {type(value).__name__} to float")
-    
-    elif expected_type == _vvisf.ISFValType_Point2D:
-        if isinstance(value, (tuple, list)) and len(value) == 2:
-            try:
-                x, y = float(value[0]), float(value[1])
-                return ISFPoint2DVal(x, y)
-            except (ValueError, TypeError):
-                raise ValueError(f"Cannot convert {value} to Point2D - values must be numbers")
-        else:
-            raise ValueError(f"Cannot convert {type(value).__name__} to Point2D - expected tuple/list with 2 numbers")
-    
-    elif expected_type == _vvisf.ISFValType_Color:
-        if isinstance(value, (tuple, list)):
-            if len(value) == 3:
-                # RGB - add alpha = 1.0
-                try:
-                    r, g, b = float(value[0]), float(value[1]), float(value[2])
-                    return ISFColorVal(r, g, b, 1.0)
-                except (ValueError, TypeError):
-                    raise ValueError(f"Cannot convert {value} to Color - values must be numbers")
-            elif len(value) == 4:
-                # RGBA
-                try:
-                    r, g, b, a = float(value[0]), float(value[1]), float(value[2]), float(value[3])
-                    return ISFColorVal(r, g, b, a)
-                except (ValueError, TypeError):
-                    raise ValueError(f"Cannot convert {value} to Color - values must be numbers")
+    def _cache_uniform_locations(self):
+        """Cache uniform locations for performance. Also include expected uniforms from fragment shader metadata."""
+        self.uniform_locations = {}
+        num_uniforms = glGetProgramiv(self.program, GL_ACTIVE_UNIFORMS)
+        # Cache all active uniforms
+        for i in range(num_uniforms):
+            name, size, uniform_type = glGetActiveUniform(self.program, i)
+            if hasattr(name, 'decode'):
+                name = name.decode('utf-8')
+            elif hasattr(name, 'tobytes'):
+                name = name.tobytes().decode('utf-8').rstrip('\x00')
             else:
-                raise ValueError(f"Cannot convert {value} to Color - expected 3 or 4 numbers")
+                name = str(name)
+            location = glGetUniformLocation(self.program, name)
+            self.uniform_locations[name] = location
+        # Also try to cache any expected uniforms from ISF inputs and standard uniforms
+        # (in case they are optimized out of the active list)
+        expected_uniforms = [
+            'PASSINDEX', 'RENDERSIZE', 'TIME', 'TIMEDELTA', 'DATE', 'FRAMEINDEX'
+        ]
+        # Add ISF input uniforms if available from metadata
+        if hasattr(self, 'expected_input_uniforms'):
+            expected_uniforms += self.expected_input_uniforms
+        for name in expected_uniforms:
+            if name not in self.uniform_locations:
+                location = glGetUniformLocation(self.program, name)
+                self.uniform_locations[name] = location
+    
+    def set_uniform(self, name: str, value: Any):
+        """Set uniform value by name."""
+        location = self.uniform_locations.get(name, -1)
+        if location == -1:
+            logger.warning(f"Uniform '{name}' not found in shader. Available uniforms: {list(self.uniform_locations.keys())}")
+            return
+        self._set_uniform_value(location, value)
+    
+    def _set_uniform_value(self, location: int, value: Any):
+        """Set uniform value based on type."""
+        import OpenGL.GL as GL
+        if isinstance(value, bool):
+            glUniform1i(location, 1 if value else 0)
+        elif isinstance(value, int):
+            glUniform1i(location, value)
+        elif isinstance(value, float):
+            glUniform1f(location, value)
+        elif isinstance(value, (list, tuple)):
+            if len(value) == 2:
+                glUniform2f(location, value[0], value[1])
+            elif len(value) == 3:
+                glUniform3f(location, value[0], value[1], value[2])
+            elif len(value) == 4:
+                glUniform4f(location, value[0], value[1], value[2], value[3])
+        elif isinstance(value, ISFColor):
+            glUniform4f(location, value.r, value.g, value.b, value.a)
+        elif isinstance(value, ISFPoint2D):
+            glUniform2f(location, value.x, value.y)
         else:
-            raise ValueError(f"Cannot convert {type(value).__name__} to Color - expected tuple/list with 3 or 4 numbers")
+            logger.warning(f"Unknown uniform type: {type(value)}")
     
-    else:
-        # For other types (Image, Audio, etc.), we can't auto-coerce
-        raise ValueError(f"Auto-coercion not supported for type {expected_type}")
+    def use(self):
+        """Use this shader program."""
+        if self.program:
+            glUseProgram(self.program)
+    
+    def cleanup(self):
+        """Clean up shader resources."""
+        if self.program:
+            glDeleteProgram(self.program)
+            self.program = None
+        if self.vertex_shader:
+            glDeleteShader(self.vertex_shader)
+            self.vertex_shader = None
+        if self.fragment_shader:
+            glDeleteShader(self.fragment_shader)
+            self.fragment_shader = None
+        self.uniform_locations.clear()
+    
+    def _shader_type_name(self, shader_type: int) -> str:
+        """Get shader type name for error messages."""
+        return {
+            GL_VERTEX_SHADER: "vertex",
+            GL_FRAGMENT_SHADER: "fragment",
+            GL_GEOMETRY_SHADER: "geometry",
+            GL_TESS_CONTROL_SHADER: "tessellation control",
+            GL_TESS_EVALUATION_SHADER: "tessellation evaluation",
+        }.get(shader_type, f"unknown ({shader_type})")
 
 
-class ISFRenderer:
-    """
-    High-level convenience class for rendering ISF shaders.
+class GLContextManager:
+    """Manages GLFW OpenGL context."""
     
-    This class provides a simplified interface for working with ISF shaders,
-    automatically handling OpenGL context management and providing convenient
-    methods for setting shader inputs and rendering to buffers.
+    def __init__(self):
+        self.window = None
+        self.initialized = False
     
-    Usage:
-        with ISFRenderer(shader_content) as renderer:
-            renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
-            buffer = renderer.render(1920, 1080)
-            image = buffer.to_pil_image()
-            image.save("output.png")
-    """
-    
-    def __init__(self, shader_content, auto_initialize=True, auto_cleanup=True, initial_inputs=None):
-        """
-        Initialize the ISF renderer.
+    def initialize(self, width: int = 1, height: int = 1):
+        """Initialize GLFW and create OpenGL context."""
+        if self.initialized:
+            return
         
-        Args:
-            shader_content (str): ISF shader source code (required)
-            auto_initialize (bool): Whether to automatically initialize the GLFW context
-            auto_cleanup (bool): Whether to automatically cleanup the context on exit
-            initial_inputs (dict, optional): Dictionary of input values to set at creation
-        """
-        self.auto_initialize = auto_initialize
-        self.auto_cleanup = auto_cleanup
-        self._context_manager = None
-        self._scene = None
-        self._shader_content = shader_content
-        self._current_inputs = {}
-        self._initial_inputs = initial_inputs
+        if not glfw.init():
+            raise ContextError("Failed to initialize GLFW")
+        
+        # Configure GLFW
+        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+        glfw.window_hint(glfw.VISIBLE, glfw.TRUE)  # Make window visible for debugging
+        
+        # Create window (required for OpenGL context)
+        self.window = glfw.create_window(width, height, "ISF Renderer", None, None)
+        if not self.window:
+            glfw.terminate()
+            raise ContextError("Failed to create GLFW window")
+        
+        glfw.make_context_current(self.window)
+        
+        # Initialize OpenGL
+        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glEnable(GL_DEPTH_TEST)
+        
+        self.initialized = True
+        logger.info("GLFW context initialized successfully")
+        status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+        if status is not None and status != GL_FRAMEBUFFER_COMPLETE:
+            logger.error("Framebuffer is not complete!")
+    
+    def cleanup(self):
+        """Clean up GLFW resources."""
+        if self.window:
+            glfw.destroy_window(self.window)
+            self.window = None
+        
+        if self.initialized:
+            glfw.terminate()
+            self.initialized = False
+    
+    def make_current(self):
+        """Make this context current."""
+        if self.window:
+            glfw.make_context_current(self.window)
     
     def __enter__(self):
-        """Enter the context manager."""
-        self._context_manager = GLContextManager(
-            auto_initialize=self.auto_initialize,
-            auto_cleanup=self.auto_cleanup
-        )
-        self._context_manager.__enter__()
-        
-        # Create scene with shader and handle compilation errors
-        try:
-            self._scene = self._context_manager.create_scene(self._shader_content)
-            self._validate_shader_compilation()
-        except Exception as e:
-            # Clean up context manager on error
-            self._context_manager.__exit__(type(e), e, e.__traceback__)
-            raise
-        
-        # Set initial inputs if provided
-        if self._initial_inputs:
-            self.set_inputs(self._initial_inputs)
-        
+        """Context manager entry."""
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Exit the context manager."""
-        try:
-            if self._context_manager:
-                self._context_manager.__exit__(exc_type, exc_val, exc_tb)
-                self._context_manager = None
-            self._scene = None
-            self._shader_content = None
-            self._current_inputs = {}
-            
-            # The underlying context manager handles cleanup automatically
-            # No need for additional cleanup here as it can cause issues
-                
-        except Exception as e:
-            # Re-raise the exception without additional cleanup
-            raise e
-            
-        return False  # Don't suppress exceptions
+        """Context manager exit."""
+        self.cleanup()
+
+
+class RenderResult:
+    def __init__(self, array):
+        self.array = array
+    def to_pil_image(self):
+        return Image.fromarray(self.array).convert('RGBA')
+    def __array__(self):
+        return self.array
+
+class ISFRenderer:
+    """Main ISF shader renderer.
     
-    def _validate_shader_compilation(self):
-        """Validate that the shader compiled successfully and extract any errors."""
-        if not self._scene:
-            raise RuntimeError("No scene available for validation")
-        
-        # Check if the scene has a valid document
-        doc = self._scene.doc()
-        if not doc:
-            raise ISFParseError("Failed to parse ISF shader content")
-        
-        # Try to render a small test frame to trigger compilation and catch errors
-        try:
-            size = Size(1, 1)  # Minimal size for testing
-            self._scene.create_and_render_a_buffer(size)
-        except Exception as e:
-            # Extract detailed error information
-            error_details = self._extract_error_details()
-            details_str = '\n' + pprint.pformat(error_details) if error_details else ''
-            raise ShaderCompilationError(f"Shader compilation failed: {str(e)}{details_str}")
+    Args:
+        shader_content (str): The ISF fragment shader content (required).
+        vertex_shader_content (str, optional): Optional GLSL vertex shader source. If not provided, uses the ISF default vertex shader.
+    """
     
-    def _extract_error_details(self):
-        """Extract detailed error information from the scene."""
-        error_details = {}
+    def __init__(self, shader_content: str = '', vertex_shader_content: str = ''):
+        self.context = GLContextManager()
+        self.parser = ISFParser()
+        self.shader_manager = None
+        self.quad_vbo = None
+        self.quad_vao = None
+        self.metadata = None
+        self._shader_content = shader_content or ''  # Store original shader content
+        self._vertex_shader_content = vertex_shader_content or ''  # Store optional vertex shader content
+        self._input_values = {}  # Store current input values
         
-        try:
-            # Get shader source for context
-            if self._scene and self._scene.doc():
-                doc = self._scene.doc()
-                if hasattr(doc, 'frag_shader_source'):
-                    error_details['fragment_shader_source'] = doc.frag_shader_source()
-                if hasattr(doc, 'vert_shader_source'):
-                    error_details['vertex_shader_source'] = doc.vert_shader_source()
-                if hasattr(doc, 'json_source_string'):
-                    error_details['json_source'] = doc.json_source_string()
-        except Exception:
-            pass
-        
-        # Try to get OpenGL error information
-        try:
-            if self._context_manager:
-                self._context_manager.check_errors("shader compilation")
-        except Exception as e:
-            error_details['opengl_errors'] = str(e)
-        
-        return error_details
-    
-    def _check_rendering_errors(self, operation_name="rendering"):
-        """Check for rendering errors and raise appropriate exceptions."""
-        try:
-            if self._context_manager:
-                self._context_manager.check_errors(operation_name)
-        except Exception as e:
-            error_details = self._extract_error_details()
-            raise ShaderRenderingError(
-                f"Rendering failed during {operation_name}: {str(e)} | {error_details}"
-            )
-    
-    def set_input(self, name, value):
-        """
-        Set a single input value.
-        
-        Args:
-            name (str): Input name
-            value: ISF value object (e.g., ISFColorVal, ISFFloatVal, etc.) or Python primitive
-                  Python primitives will be automatically coerced to the appropriate ISF type:
-                  - bool, int, float -> ISFBoolVal, ISFLongVal, ISFFloatVal
-                  - tuple/list with 2 numbers -> ISFPoint2DVal
-                  - tuple/list with 3-4 numbers -> ISFColorVal (3 = RGB+alpha=1.0, 4 = RGBA)
-        """
-        if not self._scene:
-            raise RuntimeError("No shader loaded. Context not entered?")
-        
-        # Check if the input exists before trying to set it
-        input_attr = self._scene.input_named(name)
-        if input_attr is None:
-            raise ShaderRenderingError(
-                f"Failed to set input '{name}': Input does not exist in shader"
+        # Early validation for empty shader content
+        if not self._shader_content or not self._shader_content.strip():
+            raise ShaderValidationError(
+                "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
+                shader_source=self._shader_content,
+                shader_type="fragment"
             )
         
         try:
-            # Auto-coerce Python primitives to ISF values
-            expected_type = input_attr.type()
-            isf_value = _coerce_to_isf_value(value, expected_type)
-            
-            self._scene.set_value_for_input_named(isf_value, name)
-            self._current_inputs[name] = isf_value
-        except ValueError as e:
-            raise ShaderRenderingError(
-                f"Failed to set input '{name}': {str(e)}"
-            )
+            if self._vertex_shader_content:
+                self.metadata = self.load_shader_content(self._shader_content, self._vertex_shader_content)
+            else:
+                self.metadata = self.load_shader_content(self._shader_content)
+        except ISFParseError:
+            # Let ISFParseError propagate directly
+            raise
+        except ShaderCompilationError as e:
+            # Reraise with a clear message
+            raise ShaderValidationError(
+                f"Shader validation failed: {e}",
+                shader_source=self._shader_content,
+                shader_type="fragment"
+            ) from e
         except Exception as e:
-            raise ShaderRenderingError(
-                f"Failed to set input '{name}': {str(e)}"
-            )
-    
-    def set_inputs(self, inputs):
-        """
-        Set multiple input values at once.
-        
-        Args:
-            inputs (dict): Dictionary of input values to set
-                          Keys are input names, values are ISF value objects or Python primitives
-                          Python primitives will be automatically coerced to appropriate ISF types
-        """
-        if not self._scene:
-            raise RuntimeError("No shader loaded. Context not entered?")
-        
-        for name, value in inputs.items():
-            self.set_input(name, value)
-    
-    def render(self, width, height, time_offset=0.0):
-        """
-        Render the shader to a GLBuffer.
-        
-        Args:
-            width (int): Output buffer width
-            height (int): Output buffer height
-            time_offset (float, optional): Time offset in seconds to render the shader at.
-                                         Defaults to 0.0 (current time).
-            
-        Returns:
-            GLBuffer: Rendered buffer that can be converted to PIL Image or numpy array
-            
-        Raises:
-            ShaderRenderingError: If rendering fails
-        """
-        if not self._scene:
-            raise RuntimeError("No shader loaded. Context not entered?")
-        
+            # Catch-all for other unexpected errors
+            raise ShaderValidationError(
+                f"Shader validation failed: {e}",
+                shader_source=self._shader_content,
+                shader_type="fragment"
+            ) from e
+
+    def set_input(self, name: str, value: Any):
+        """Set the value of an input. Reloads shader if input value changes."""
+        if not self.metadata or not self.metadata.inputs:
+            raise RenderingError("No shader loaded or shader has no inputs.")
+        # Find input definition
+        input_def = next((inp for inp in self.metadata.inputs if inp.name == name), None)
+        if input_def is None:
+            raise RenderingError(f"Input '{name}' not found in shader inputs.")
         try:
-            size = Size(width, height)
-            buffer = self._scene.create_and_render_a_buffer(size, time_offset)
-            
-            # Check for rendering errors
-            self._check_rendering_errors("buffer creation")
-            
-            return buffer
-            
+            # Validate and coerce value
+            coerced_value = self.parser.validate_inputs(self.metadata, {name: value})[name]
         except Exception as e:
-            error_details = self._extract_error_details()
-            details_str = '\n' + pprint.pformat(error_details) if error_details else ''
-            raise ShaderRenderingError(f"Failed to render to buffer: {str(e)}{details_str}")
-    
-    def get_shader_info(self):
-        """
-        Get information about the loaded shader.
-        
-        Returns:
-            dict: Shader information including name, description, inputs, etc.
-        """
-        if not self._scene or not self._scene.doc():
-            return None
-        
-        doc = self._scene.doc()
-        return {
-            'name': doc.name(),
-            'description': doc.description(),
-            'credit': doc.credit(),
-            'version': doc.vsn(),
-            'categories': doc.categories(),
-            'inputs': [attr.name() for attr in doc.inputs()]
+            raise RenderingError(f"Failed to set input '{name}': {e}")
+        # Only reload if value changes
+        if name not in self._input_values or self._input_values[name] != coerced_value:
+            self._input_values[name] = coerced_value
+            # Reload shader to update uniforms (if needed)
+            if self._shader_content:
+                if self._vertex_shader_content:
+                    self.metadata = self.load_shader_content(self._shader_content, self._vertex_shader_content)
+                else:
+                    self.metadata = self.load_shader_content(self._shader_content)
+        # else: value is the same, do nothing
+
+    def _ensure_version_directive(self, source: str) -> str:
+        """Ensure the shader source starts with a #version directive."""
+        if "#version" not in source:
+            return "#version 330\n" + source
+        # Replace '#version 330 core' with '#version 330' for compatibility
+        lines = source.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version') and 'core' in line:
+                lines[i] = line.replace('core', '').strip()
+        return '\n'.join(lines)
+
+    def _patch_legacy_gl_fragcolor(self, source: str) -> str:
+        """Ensure the fragment shader uses 'out vec4 isf_FragColor;' as the output variable and assignments are to isf_FragColor."""
+        lines = source.splitlines()
+        # Insert after #version
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version'):
+                insert_idx = i + 1
+                break
+        # Always insert the out variable if not present
+        if not any('out vec4 isf_FragColor;' in l for l in lines):
+            lines.insert(insert_idx, 'out vec4 isf_FragColor;')
+            insert_idx += 1
+        # Remove any #define gl_FragColor isf_FragColor lines
+        lines = [l for l in lines if '#define gl_FragColor isf_FragColor' not in l]
+        # Replace all assignments to gl_FragColor and fragColor with isf_FragColor
+        source = '\n'.join(lines)
+        source = source.replace('gl_FragColor', 'isf_FragColor')
+        source = source.replace('fragColor', 'isf_FragColor')
+        return source
+
+    def _inject_uniform_declarations(self, source: str, metadata: ISFMetadata) -> str:
+        """Inject uniform declarations for all ISF inputs at the top of the shader."""
+        if not metadata or not metadata.inputs:
+            return source
+        # Map ISF types to GLSL types
+        type_map = {
+            'bool': 'bool',
+            'long': 'int',
+            'float': 'float',
+            'point2D': 'vec2',
+            'color': 'vec4',
+            'image': 'sampler2D',
+            'audio': 'sampler2D',
+            'audioFFT': 'sampler2D',
         }
-    
-    def get_current_inputs(self):
-        """
-        Get the currently set input values.
-        
-        Returns:
-            dict: Dictionary of current input values
-        """
-        return self._current_inputs.copy()
-    
-    def check_errors(self, operation_name="operation"):
-        """
-        Check for OpenGL errors.
-        
-        Args:
-            operation_name (str): Name of the operation for error reporting
-        """
-        if self._context_manager:
-            self._context_manager.check_errors(operation_name)
-    
-    def is_valid(self):
-        """
-        Check if the renderer is in a valid state and the shader can be rendered.
-        
-        This method performs actual validation by attempting a test render to ensure
-        the shader compiles and can be executed successfully. This catches issues
-        like non-constant loop conditions that should fail according to the ISF specification.
-        
-        Returns:
-            bool: True if the renderer is valid and the shader can be rendered
-        """
-        # Basic state checks
-        if self._context_manager is None or self._scene is None:
-            return False
-        
-        # Check if the scene has a valid document
-        doc = self._scene.doc()
-        if not doc:
-            return False
-        
-        # Perform actual validation by attempting a test render
+        uniform_lines = []
+        for inp in metadata.inputs:
+            glsl_type = type_map.get(inp.type, 'float')
+            uniform_lines.append(f'uniform {glsl_type} {inp.name};')
+        # Insert after #version and any out variable
+        lines = source.splitlines()
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version'):
+                insert_idx = i + 1
+            elif line.strip().startswith('out vec4 fragColor;'):
+                insert_idx = i + 1
+        for j, uline in enumerate(uniform_lines):
+            lines.insert(insert_idx + j, uline)
+        return '\n'.join(lines)
+
+    def _inject_standard_uniforms(self, source: str) -> str:
+        """Inject standard ISF uniforms and isf_FragNormCoord if not already declared."""
+        # According to ISF Spec, the standard uniforms are:
+        # PASSINDEX (int), RENDERSIZE (vec2), TIME (float), TIMEDELTA (float), DATE (vec4), FRAMEINDEX (int)
+        standard_uniforms = [
+            ("int", "PASSINDEX"),
+            ("vec2", "RENDERSIZE"),
+            ("float", "TIME"),
+            ("float", "TIMEDELTA"),
+            ("vec4", "DATE"),
+            ("int", "FRAMEINDEX"),
+        ]
+        lines = source.splitlines()
+        # Find where to insert (after #version and any out variable)
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version'):
+                insert_idx = i + 1
+            elif line.strip().startswith('out vec4 fragColor;'):
+                insert_idx = i + 1
+        # Only inject if not already present
+        for dtype, name in standard_uniforms:
+            if not any(f"uniform {dtype} {name}" in l or f"uniform {name}" in l for l in lines):
+                lines.insert(insert_idx, f"uniform {dtype} {name};")
+                insert_idx += 1
+        # Inject isf_FragNormCoord as in/varying if not present
+        # Only inject if referenced in the shader
+        frag_norm_coord_needed = any('isf_FragNormCoord' in l for l in lines)
+        if frag_norm_coord_needed and not any("in vec2 isf_FragNormCoord;" in l for l in lines):
+            lines.insert(insert_idx, "in vec2 isf_FragNormCoord;")
+            insert_idx += 1
+        return '\n'.join(lines)
+
+    def _inject_isf_vertShaderInit(self, source: str) -> str:
+        """Inject a definition for isf_vertShaderInit() if referenced but not defined, and declare isf_FragNormCoord, position, and texCoord as needed with explicit locations."""
+        needs_inject = 'isf_vertShaderInit' in source and 'void isf_vertShaderInit' not in source
+        already_declared_frag_norm = 'out vec2 isf_FragNormCoord;' in source
+        already_declared_position = 'layout(location = 0) in vec2 position;' in source
+        already_declared_texcoord = 'layout(location = 1) in vec2 texCoord;' in source
+        # Remove any old 'in vec2 position;' or 'in vec2 texCoord;' lines
+        if needs_inject:
+            lines = source.splitlines()
+            # Remove old attribute declarations if present
+            lines = [l for l in lines if l.strip() not in ('in vec2 position;', 'in vec2 texCoord;')]
+            insert_idx = 0
+            for i, line in enumerate(lines):
+                if line.strip().startswith('#version'):
+                    insert_idx = i + 1
+                    break
+            # Inject required declarations if not present
+            if not already_declared_frag_norm:
+                lines.insert(insert_idx, 'out vec2 isf_FragNormCoord;')
+                insert_idx += 1
+            if not already_declared_position:
+                lines.insert(insert_idx, 'layout(location = 0) in vec2 position;')
+                insert_idx += 1
+            if not already_declared_texcoord:
+                lines.insert(insert_idx, 'layout(location = 1) in vec2 texCoord;')
+                insert_idx += 1
+            # Inject the function
+            inject_code = (
+                "void isf_vertShaderInit() {\n"
+                "    gl_Position = vec4(position, 0.0, 1.0);\n"
+                "    isf_FragNormCoord = vec2(texCoord.x, 1.0 - texCoord.y);\n"
+                "}\n"
+            )
+            lines.insert(insert_idx, inject_code)
+            return '\n'.join(lines)
+        return source
+
+    def default_vertex_shader(self):
+        # Literal ISF default vertex shader
+        return (
+            "void main() {\n"
+            "  isf_vertShaderInit();\n"
+            "}\n"
+        )
+
+    def _set_standard_uniforms(self, width: int, height: int, time_offset: float = 0.0):
+        """Set standard ISF uniforms."""
+        # Set all standard uniforms, using default values for those not tracked
+        if self.shader_manager is not None:
+            self.shader_manager.set_uniform("PASSINDEX", 0)
+            self.shader_manager.set_uniform("RENDERSIZE", [width, height])
+            self.shader_manager.set_uniform("TIME", time_offset)
+            self.shader_manager.set_uniform("TIMEDELTA", 0.0)  # TODO: Calculate delta
+            self.shader_manager.set_uniform("DATE", [1970.0, 1.0, 1.0, 0.0])  # Placeholder: UNIX epoch
+            self.shader_manager.set_uniform("FRAMEINDEX", 0)   # TODO: Track frame index
+
+    def load_shader(self, shader_path: str, vertex_shader_content: str = '') -> ISFMetadata:
+        """Load and parse ISF shader file. Optionally takes a vertex shader source."""
+        glsl_code, metadata = self.parser.parse_file(shader_path)
+        # Initialize context if needed
+        if not self.context.initialized:
+            self.context.initialize()
+        # Compile shaders
+        if vertex_shader_content:
+            vertex_source = vertex_shader_content
+        else:
+            vertex_source = metadata.vertex_shader or self.default_vertex_shader()
+        vertex_source = self._ensure_version_directive(vertex_source)
+        vertex_source = self._inject_isf_vertShaderInit(vertex_source)
+        vertex_source = self._inject_uniform_declarations(vertex_source, metadata)
+        glsl_code = self._ensure_version_directive(glsl_code)
+        glsl_code = self._patch_legacy_gl_fragcolor(glsl_code)
+        glsl_code = self._inject_uniform_declarations(glsl_code, metadata)
+        glsl_code = self._inject_standard_uniforms(glsl_code)
+        self.shader_manager = ShaderManager()
+        # Provide expected input uniforms for caching
+        if hasattr(metadata, 'inputs') and metadata.inputs:
+            self.shader_manager.expected_input_uniforms = [inp.name for inp in metadata.inputs]
+        self.shader_manager.create_program(vertex_source, glsl_code)
+        # Setup rendering quad
+        self._setup_quad()
+        return metadata
+
+    def load_shader_content(self, content: str, vertex_shader_content: str = '') -> ISFMetadata:
+        """Load and parse ISF shader content. Optionally takes a vertex shader source."""
+        # Early validation for empty shader content
+        if not content or not content.strip():
+            raise ShaderValidationError(
+                "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
+                shader_source=content,
+                shader_type="fragment"
+            )
         try:
-            # Try to render a minimal test frame to trigger compilation and catch errors
-            size = Size(1, 1)  # Minimal size for testing
-            self._scene.create_and_render_a_buffer(size)
-            
-            # Check for any OpenGL errors that might have occurred
-            self._check_rendering_errors("validation test render")
-            
-            return True
-            
+            glsl_code, metadata = self.parser.parse_content(content)
+        except ISFParseError:
+            # Let ISFParseError propagate directly
+            raise
         except Exception as e:
-            # If any exception occurs during test rendering, the shader is not valid
-            # This includes ShaderCompilationError, ShaderRenderingError, etc.
-            return False 
-    
-    def get_error_log(self):
-        """
-        Get the shader compilation and linking error log (if any) from the underlying scene.
-        Returns:
-            dict: Error log dictionary from the OpenGL driver and VVISF library, or an empty dict if none.
-        """
-        if not self._scene:
-            return {}
+            raise ShaderValidationError(
+                f"Shader parsing failed: {e}",
+                shader_source=content,
+                shader_type="fragment"
+            ) from e
+        # Initialize context if needed
+        if not self.context.initialized:
+            self.context.initialize()
+        # Compile shaders
+        if vertex_shader_content:
+            vertex_source = vertex_shader_content
+        else:
+            vertex_source = metadata.vertex_shader or self.default_vertex_shader()
+        vertex_source = self._ensure_version_directive(vertex_source)
+        vertex_source = self._inject_isf_vertShaderInit(vertex_source)
+        vertex_source = self._inject_uniform_declarations(vertex_source, metadata)
+        glsl_code = self._ensure_version_directive(glsl_code)
+        glsl_code = self._patch_legacy_gl_fragcolor(glsl_code)
+        glsl_code = self._inject_uniform_declarations(glsl_code, metadata)
+        glsl_code = self._inject_standard_uniforms(glsl_code)
+        logger.debug("Vertex Shader Source:\n" + vertex_source)
+        logger.debug("Fragment Shader Source:\n" + glsl_code)
+        self.shader_manager = ShaderManager()
+        # Provide expected input uniforms for caching
+        if hasattr(metadata, 'inputs') and metadata.inputs:
+            self.shader_manager.expected_input_uniforms = [inp.name for inp in metadata.inputs]
         try:
-            return _vvisf.get_error_dict(self._scene)
-        except Exception:
-            return {} 
+            self.shader_manager.create_program(vertex_source, glsl_code)
+        except ShaderCompilationError as e:
+            raise ShaderValidationError(
+                f"Shader compilation failed: {e}",
+                shader_source=glsl_code,
+                shader_type="fragment"
+            ) from e
+        # Setup rendering quad
+        self._setup_quad()
+        return metadata
+    
+    def render(self, 
+               width: int = 1920, 
+               height: int = 1080,
+               inputs: Optional[Dict[str, Any]] = None,
+               metadata: Optional[ISFMetadata] = None,
+               time_offset: float = 0.0) -> 'RenderResult':
+        """Render shader to numpy array (wrapped in RenderResult)."""
+        if not self.shader_manager:
+            raise RenderingError("No shader loaded. Call load_shader() first.")
+        # Use self._input_values if inputs not provided
+        if inputs is None:
+            inputs = self._input_values
+        # Use self.metadata if metadata not provided
+        if metadata is None:
+            metadata = self.metadata
+        # Validate inputs
+        if metadata and inputs:
+            validated_inputs = self.parser.validate_inputs(metadata, inputs)
+        else:
+            validated_inputs = {}
+        # --- Offscreen FBO/texture setup ---
+        fbo = glGenFramebuffers(1)
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+        tex = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, tex)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+        status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+        if status != GL_FRAMEBUFFER_COMPLETE:
+            glDeleteFramebuffers(1, [fbo])
+            glDeleteTextures(1, [tex])
+            raise RenderingError("Framebuffer is not complete for offscreen rendering.")
+        # Set viewport
+        glViewport(0, 0, width, height)
+        glDisable(GL_DEPTH_TEST)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        # Use shader program
+        self.shader_manager.use()
+        # Set uniforms
+        self._set_standard_uniforms(width, height, time_offset)
+        self._set_input_uniforms(validated_inputs)
+        # Draw the quad
+        glBindVertexArray(self.quad_vao)
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        glBindVertexArray(0)
+        glFlush()
+        glFinish()
+        # Read pixels from FBO
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+        data = glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE)
+        if isinstance(data, bytes):
+            image_array = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 4)
+            image_array = np.flipud(image_array)
+            # Cleanup FBO/texture
+            glBindFramebuffer(GL_FRAMEBUFFER, 0)
+            glDeleteFramebuffers(1, [fbo])
+            glDeleteTextures(1, [tex])
+            return RenderResult(image_array)
+        else:
+            glBindFramebuffer(GL_FRAMEBUFFER, 0)
+            glDeleteFramebuffers(1, [fbo])
+            glDeleteTextures(1, [tex])
+            logger.error(f"glReadPixels failed or returned unexpected type: {type(data)} value: {data}")
+            raise RenderingError("glReadPixels failed to return pixel data.")
+    
+    def _setup_quad(self):
+        """Setup full-screen quad for rendering."""
+        # Quad vertices (position, texcoord)
+        # 4 vertices, each with (x, y, u, v)
+        vertices = np.array([
+            # position    # texcoord
+            -1.0, -1.0,   0.0, 0.0,  # bottom-left
+             1.0, -1.0,   1.0, 0.0,  # bottom-right
+            -1.0,  1.0,   0.0, 1.0,  # top-left
+             1.0,  1.0,   1.0, 1.0,  # top-right
+        ], dtype=np.float32)
+        # Create VAO
+        self.quad_vao = glGenVertexArrays(1)
+        glBindVertexArray(self.quad_vao)
+        # Create VBO
+        self.quad_vbo = glGenBuffers(1)
+        glBindBuffer(GL_ARRAY_BUFFER, self.quad_vbo)
+        glBufferData(GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL_STATIC_DRAW)
+        stride = 4 * vertices.itemsize  # 4 floats per vertex
+        # Position attribute (location = 0)
+        glEnableVertexAttribArray(0)
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(0))
+        # TexCoord attribute (location = 1)
+        glEnableVertexAttribArray(1)
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, ctypes.c_void_p(2 * vertices.itemsize))
+        glBindVertexArray(0)
+        status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+        if status is not None and status != GL_FRAMEBUFFER_COMPLETE:
+            logger.error("Framebuffer is not complete after VAO/VBO setup!")
+
+    def _set_input_uniforms(self, inputs: Dict[str, ISFValue]):
+        """Set input uniform values."""
+        if self.shader_manager is not None:
+            for name, value in inputs.items():
+                self.shader_manager.set_uniform(name, value)
+    
+    def save_render(self, 
+                   output_path: str,
+                   width: int = 1920,
+                   height: int = 1080,
+                   inputs: Optional[Dict[str, Any]] = None,
+                   metadata: Optional[ISFMetadata] = None):
+        """Render shader and save to file."""
+        from PIL import Image
+        
+        render_result = self.render(width, height, inputs, metadata)
+        image = render_result.to_pil_image()
+        image.save(output_path)
+    
+    def cleanup(self):
+        """Clean up all resources."""
+        if self.shader_manager:
+            self.shader_manager.cleanup()
+            self.shader_manager = None
+        
+        if self.quad_vao:
+            glDeleteVertexArrays(1, [self.quad_vao])
+            self.quad_vao = None
+        
+        if self.quad_vbo:
+            glDeleteBuffers(1, [self.quad_vbo])
+            self.quad_vbo = None
+        
+        self.context.cleanup()
+    
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.cleanup() 
