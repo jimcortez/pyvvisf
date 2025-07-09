@@ -190,9 +190,8 @@ pre-commit run --all-files
 ### Code Style Guidelines
 
 1. **Python**: Follow PEP 8 with Black formatting
-2. **C++**: Follow project C++ style guidelines
-3. **Documentation**: Use docstrings and type hints
-4. **Comments**: Write clear, concise comments
+2. **Documentation**: Use docstrings and type hints
+3. **Comments**: Write clear, concise comments
 
 ## Building and Testing
 

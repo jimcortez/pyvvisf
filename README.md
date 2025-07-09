@@ -144,28 +144,6 @@ See the `examples/` directory for complete examples:
 - `pure_python_demo.py`: Basic usage demonstration
 - `isf_renderer_demo.py`: Advanced rendering examples
 
-## Migration from VVISF-GL
-
-This is a complete re-implementation and is not backward compatible with the previous VVISF-GL-based version. Key differences:
-
-### Old API (VVISF-GL)
-```python
-from pyvvisf import ISFScene, CreateISFSceneRef
-
-scene = CreateISFSceneRef()
-doc = scene.createISFDocRefWith("shader.fs")
-# ... complex C++-style API
-```
-
-### New API (Pure Python)
-```python
-from pyvvisf import ISFRenderer
-
-with ISFRenderer() as renderer:
-    metadata = renderer.load_shader("shader.fs")
-    image = renderer.render(width=1920, height=1080)
-```
-
 ## Development
 
 ### Building
