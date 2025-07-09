@@ -58,12 +58,11 @@ class GLContextManager:
     def __enter__(self):
         """Enter the context manager."""
         try:
-            # Initialize context if requested
-            if self.auto_initialize:
-                if not initialize_glfw_context():
-                    raise RuntimeError("Failed to initialize GLFW context")
-                self._context_initialized = True
-            
+            # Always ensure GLFW context is initialized before acquiring context ref
+            if not initialize_glfw_context():
+                raise RuntimeError("Failed to initialize GLFW context")
+            self._context_initialized = True
+
             # Acquire context reference first
             acquire_context_ref()
             self._context_acquired = True
@@ -88,26 +87,21 @@ class GLContextManager:
     
     def _cleanup(self):
         """Internal cleanup method."""
-        try:
-            # Clear managed scenes (they will be invalid after context cleanup)
-            self._managed_scenes.clear()
-            
-            # Release context reference if acquired
-            if self._context_acquired:
-                release_context_ref()
-                self._context_acquired = False
-            
-            # Only cleanup context if explicitly requested, not during normal operation
-            # This prevents destroying the global context that might be needed by other renderers
-            # The global context will be cleaned up when the process exits
-            if self._context_initialized and self.auto_cleanup:
-                # Skip cleanup_glfw_context() to preserve global context
-                # cleanup_glfw_context()
-                self._context_initialized = False
-                
-        except Exception as e:
-            # Log cleanup errors but don't raise them
-            print(f"Warning: Error during context cleanup: {e}")
+        # Clear managed scenes (they will be invalid after context cleanup)
+        self._managed_scenes.clear()
+        
+        # Release context reference if acquired
+        if self._context_acquired:
+            release_context_ref()
+            self._context_acquired = False
+        
+        # Only cleanup context if explicitly requested, not during normal operation
+        # This prevents destroying the global context that might be needed by other renderers
+        # The global context will be cleaned up when the process exits
+        if self._context_initialized and self.auto_cleanup:
+            # Skip cleanup_glfw_context() to preserve global context
+            # cleanup_glfw_context()
+            self._context_initialized = False
     
     def create_scene(self, shader_content=None):
         """
@@ -202,7 +196,7 @@ class GLContextManager:
                 new_scenes.append(new_scene)
                 
             except Exception as e:
-                print(f"Warning: Failed to recreate scene {i}: {e}")
+                # print(f"Warning: Failed to recreate scene {i}: {e}")
                 # Create a basic scene as fallback
                 new_scenes.append(CreateISFSceneRef())
         

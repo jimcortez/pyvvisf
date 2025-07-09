@@ -2,16 +2,14 @@
 requires = [
     "setuptools>=61.0", 
     "wheel", 
-    "pybind11>=2.6.0",
     "setuptools_scm[toml]>=6.2",
-    "ninja>=1.10.0"
 ]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyvvisf"
 dynamic = ["version"]
-description = "Python bindings for VVISF (Vidvox Interactive Shader Format) using pybind11"
+description = "Pure Python ISF shader renderer with PyOpenGL and json5"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -19,7 +17,7 @@ authors = [
     {name = "Jim Cortez", email = "gitstuff@jimcortez.com"}
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
@@ -34,13 +32,16 @@ classifiers = [
 ]
 requires-python = ">=3.8"
 dependencies = [
+    "glfw>=2.5.0",
+    "PyOpenGL>=3.1.0",
+    "PyOpenGL-accelerate>=3.1.0",
+    "json5>=0.9.0",
     "pillow>=9.0.0",
+    "numpy>=1.21.0",
+    "pydantic>=1.8.0",
 ]
 
 [project.optional-dependencies]
-numpy = [
-    "numpy>=1.21.0",
-]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -51,7 +52,6 @@ dev = [
     "pre-commit>=2.20.0",
     "cibuildwheel>=3.0.0",
     "build>=0.10.0",
-    "numpy>=1.21.0",
 ]
 
 [project.urls]
@@ -65,23 +65,6 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/pyvvisf/_version.py"
-
-[tool.cibuildwheel]
-# Build for multiple platforms
-build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*"]
-skip = ["*-musllinux*"]  # Skip musl builds for now
-
-[tool.cibuildwheel.linux]
-before-all = "scripts/install_dependencies.sh"
-environment = { VVISF_BUILD_TYPE = "wheel" }
-
-[tool.cibuildwheel.macos]
-before-all = "scripts/install_dependencies.sh"
-environment = { VVISF_BUILD_TYPE = "wheel" }
-
-[tool.cibuildwheel.windows]
-before-all = "scripts/install_dependencies.bat"
-environment = { VVISF_BUILD_TYPE = "wheel" }
 
 [tool.black]
 line-length = 88
@@ -129,7 +112,4 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=pyvvisf",
-    "--cov-report=term-missing",
-    "--cov-report=html",
 ] 
