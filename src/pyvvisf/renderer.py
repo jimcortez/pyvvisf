@@ -115,7 +115,6 @@ class ShaderManager:
         """Set uniform value by name."""
         location = self.uniform_locations.get(name, -1)
         if location == -1:
-            logger.warning(f"Uniform '{name}' not found in shader. Available uniforms: {list(self.uniform_locations.keys())}")
             return
         self._set_uniform_value(location, value)
     
