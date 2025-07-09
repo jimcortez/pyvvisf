@@ -11,8 +11,7 @@ name = "pyvvisf"
 dynamic = ["version"]
 description = "Pure Python ISF shader renderer with PyOpenGL and json5"
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = {file = "LICENSE"}
 authors = [
     {name = "Jim Cortez", email = "gitstuff@jimcortez.com"}
 ]
