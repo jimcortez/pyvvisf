@@ -15,51 +15,9 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Setup headless display
       uses: pyvista/setup-headless-display-action@v3
-
-    - name: Initialize submodules
-      shell: bash
-      run: |
-        echo "Current directory: $(pwd)"
-        echo "Repository contents:"
-        ls -la
-        echo "Git submodule status:"
-        git submodule status
-        echo "Initializing submodules..."
-        git submodule update --init --recursive
-        echo "After submodule initialization:"
-        ls -la
-        if [ -d "external" ]; then
-          echo "External directory contents:"
-          ls -la external/
-        else
-          echo "ERROR: external/ directory not found after submodule initialization"
-          exit 1
-        fi
-
-    - name: Build VVISF libraries
-      shell: bash
-      run: |
-        echo "Building VVISF libraries..."
-        echo "Current directory: $(pwd)"
-        echo "Checking VVISF-GL submodule..."
-        ls -la external/VVISF-GL/
-        echo "Checking for required dependencies..."
-        which gcc || echo "gcc not found"
-        which g++ || echo "g++ not found"
-        which make || echo "make not found"
-        echo "Installing system dependencies..."
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake libglfw3-dev libglew-dev
-        echo "Making build script executable..."
-        chmod +x scripts/build_vvisf.sh
-        echo "Running build script..."
-        ./scripts/build_vvisf.sh
-        echo "VVISF libraries built successfully"
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -88,103 +46,16 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        submodules: recursive
+        python-version: "3.11"
 
-    - name: Initialize submodules (Linux/macOS)
-      if: runner.os != 'Windows'
-      shell: bash
+    - name: Install dependencies
       run: |
-        echo "Current directory: $(pwd)"
-        echo "Repository contents:"
-        ls -la
-        echo "Git submodule status:"
-        git submodule status
-        echo "Initializing submodules..."
-        git submodule update --init --recursive
-        echo "After submodule initialization:"
-        ls -la
-        if [ -d "external" ]; then
-          echo "External directory contents:"
-          ls -la external/
-        else
-          echo "ERROR: external/ directory not found after submodule initialization"
-          exit 1
-        fi
-
-    - name: Initialize submodules (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        Write-Host "Current directory: $(Get-Location)"
-        Write-Host "Repository contents:"
-        Get-ChildItem -Force
-        Write-Host "Git submodule status:"
-        git submodule status
-        Write-Host "Initializing submodules..."
-        git submodule update --init --recursive
-        Write-Host "After submodule initialization:"
-        Get-ChildItem -Force
-        if (Test-Path "external") {
-          Write-Host "External directory contents:"
-          Get-ChildItem -Force external/
-        } else {
-          Write-Host "ERROR: external/ directory not found after submodule initialization"
-          exit 1
-        }
-
-    - name: Build VVISF libraries (Linux)
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        echo "Building VVISF libraries on Linux..."
-        echo "Current directory: $(pwd)"
-        echo "Checking VVISF-GL submodule..."
-        ls -la external/VVISF-GL/
-        echo "Checking for required dependencies..."
-        which gcc || echo "gcc not found"
-        which g++ || echo "g++ not found"
-        which make || echo "make not found"
-        echo "Installing system dependencies..."
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake libglfw3-dev libglew-dev
-        echo "Making build script executable..."
-        chmod +x scripts/build_vvisf.sh
-        echo "Running build script..."
-        ./scripts/build_vvisf.sh
-        echo "VVISF libraries built successfully"
-
-    - name: Build VVISF libraries (macOS)
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        echo "Building VVISF libraries on macOS..."
-        echo "Current directory: $(pwd)"
-        echo "Checking VVISF-GL submodule..."
-        ls -la external/VVISF-GL/
-        echo "Checking for required dependencies..."
-        which gcc || echo "gcc not found"
-        which g++ || echo "g++ not found"
-        which make || echo "make not found"
-        echo "Installing system dependencies..."
-        brew install cmake glfw glew
-        echo "Making build script executable..."
-        chmod +x scripts/build_vvisf.sh
-        echo "Running build script..."
-        ./scripts/build_vvisf.sh
-        echo "VVISF libraries built successfully"
-
-    - name: Build VVISF libraries (Windows)
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        Write-Host "Building VVISF libraries on Windows..."
-        Write-Host "Current directory: $(Get-Location)"
-        Write-Host "Checking VVISF-GL submodule..."
-        Get-ChildItem -Force external/VVISF-GL/
-        Write-Host "Checking for required dependencies..."
-        try { Get-Command msbuild -ErrorAction Stop } catch { Write-Host "MSBuild not found" }
-        Write-Host "VVISF libraries will be built by cibuildwheel dependency installation script"
+        python -m pip install --upgrade pip
+        pip install cibuildwheel
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.0.0
@@ -216,8 +87,6 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Set up Python
       uses: actions/setup-python@v5
