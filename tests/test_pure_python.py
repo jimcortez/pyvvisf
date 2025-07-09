@@ -5,9 +5,9 @@ import numpy as np
 from pathlib import Path
 
 # Import the new implementation
-from pyvvisf.core.parser import ISFParser, ISFMetadata
-from pyvvisf.core.types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
-from pyvvisf.core.errors import ISFParseError, ValidationError
+from pyvvisf.parser import ISFParser, ISFMetadata
+from pyvvisf.types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
+from pyvvisf.errors import ISFParseError, ValidationError
 
 
 class TestISFParser:
@@ -108,7 +108,7 @@ class TestISFParser:
     
     def test_validate_inputs(self):
         """Test input validation."""
-        from pyvvisf.core.parser import ISFInput
+        from pyvvisf.parser import ISFInput
         
         metadata = ISFMetadata(
             inputs=[
@@ -144,7 +144,7 @@ class TestISFParser:
         
         # Test invalid range
         inputs = {'scale': 10.0}  # Above max
-        from pyvvisf.core.errors import ShaderCompilationError
+        from pyvvisf.errors import ShaderCompilationError
         with pytest.raises(ShaderCompilationError):
             self.parser.validate_inputs(metadata, inputs)
 
@@ -213,7 +213,7 @@ class TestISFTypes:
     
     def test_coerce_to_isf_value(self):
         """Test value coercion."""
-        from pyvvisf.core.types import coerce_to_isf_value
+        from pyvvisf.types import coerce_to_isf_value
         
         # Test auto-coercion
         assert isinstance(coerce_to_isf_value([1.0, 0.0, 0.0]), ISFColor)
@@ -235,7 +235,7 @@ class TestErrorHandling:
     
     def test_isf_error_with_context(self):
         """Test ISFError with context."""
-        from pyvvisf.core.errors import ISFError
+        from pyvvisf.errors import ISFError
         
         error = ISFError("Test error", {"file": "test.fs", "line": 10})
         assert "Test error" in str(error)

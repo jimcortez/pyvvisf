@@ -3,9 +3,9 @@
 import pytest
 import numpy as np
 from pathlib import Path
-from pyvvisf.core.parser import ISFParser, ISFMetadata, ISFInput
-from pyvvisf.core.types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
-from pyvvisf.core.errors import ISFParseError, ValidationError, ShaderCompilationError
+from pyvvisf.parser import ISFParser, ISFMetadata, ISFInput
+from pyvvisf.types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
+from pyvvisf.errors import ISFParseError, ValidationError, ShaderCompilationError
 
 # 1. Standard Uniforms
 @pytest.mark.parametrize("uniform_name, glsl_type", [
