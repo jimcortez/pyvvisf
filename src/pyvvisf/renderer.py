@@ -433,6 +433,22 @@ class ISFRenderer:
                     self.metadata = self.load_shader_content(self._shader_content)
         # else: value is the same, do nothing
 
+    def set_inputs(self, inputs: dict):
+        """
+        Convenience method to set multiple shader inputs at once.
+
+        Args:
+            inputs (dict): Dictionary mapping input names to values.
+
+        Raises:
+            TypeError: If inputs is not a dictionary.
+            RenderingError: If any input is not found or invalid (from set_input).
+        """
+        if not isinstance(inputs, dict):
+            raise TypeError("inputs must be a dictionary of input names to values")
+        for name, value in inputs.items():
+            self.set_input(name, value)
+
     def _ensure_version_directive(self, source: str) -> str:
         """Ensure the shader source starts with a #version directive."""
         if "#version" not in source:

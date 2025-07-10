@@ -55,6 +55,8 @@ You can set shader inputs using plain Python primitives:
 - ``int``, ``float``, ``bool``
 - ``list`` or ``tuple`` (for colors and points)
 
+You can set a single input with :meth:`set_input`, or set multiple inputs at once with :meth:`set_inputs`:
+
 Examples:
 
 .. code-block:: python
@@ -63,6 +65,15 @@ Examples:
     renderer.set_input("color", [1.0, 0.0, 0.0, 1.0])  # RGBA color as list
     renderer.set_input("point", (0.5, 0.5))  # point2D as tuple
     renderer.set_input("flag", False)  # boolean
+
+    # Set multiple inputs at once
+    renderer.set_inputs({
+        "color": [0.0, 1.0, 0.0, 1.0],
+        "scale": 0.5,
+        "flag": True
+    })
+
+The :meth:`set_inputs` method is a convenience function that takes a dictionary of input names and values, and calls :meth:`set_input` for each one. This is useful for updating several shader parameters in a single call.
 
 You do not need to use ISFColor, ISFPoint2D, or other ISF value classes directly.
 

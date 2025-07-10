@@ -319,6 +319,81 @@ class TestISFRendererErrors:
             image = buffer.to_pil_image()
             assert image.size == (8, 8)
 
+    def test_set_inputs_multiple_valid(self):
+        """Test set_inputs sets multiple valid inputs at once."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Test set_inputs",
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]},
+                {"NAME": "intensity", "TYPE": "float", "DEFAULT": 1.0, "MIN": 0.0, "MAX": 2.0}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color * vec4(intensity, intensity, intensity, 1.0);
+        }
+        """
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            renderer.set_inputs({
+                "color": [0.0, 1.0, 0.0, 1.0],
+                "intensity": 0.5
+            })
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            arr = np.array(image)
+            assert arr.shape == (8, 8, 4)
+
+    def test_set_inputs_invalid_key_raises(self):
+        """Test set_inputs raises RenderingError if a key is not a valid input name."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Test set_inputs invalid key",
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color;
+        }
+        """
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            with pytest.raises(pyvvisf.RenderingError):
+                renderer.set_inputs({"not_a_real_input": 1.0})
+
+    def test_set_inputs_non_dict_raises(self):
+        """Test set_inputs raises TypeError if argument is not a dict."""
+        shader_content = """
+        /*{"DESCRIPTION": "Test set_inputs non-dict", "INPUTS": []}*/
+        void main() { gl_FragColor = vec4(1.0); }
+        """
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            with pytest.raises(TypeError):
+                renderer.set_inputs("not a dict")  # type: ignore
+
+    def test_set_inputs_equivalent_to_set_input_loop(self):
+        """Test set_inputs is equivalent to calling set_input in a loop."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Test set_inputs equivalence",
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]},
+                {"NAME": "intensity", "TYPE": "float", "DEFAULT": 1.0}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color * vec4(intensity, intensity, intensity, 1.0);
+        }
+        """
+        with pyvvisf.ISFRenderer(shader_content) as renderer1, pyvvisf.ISFRenderer(shader_content) as renderer2:
+            # Use set_inputs
+            renderer1.set_inputs({"color": [0.0, 0.0, 1.0, 1.0], "intensity": 0.7})
+            arr1 = np.array(renderer1.render(8, 8).to_pil_image())
+            # Use set_input in a loop
+            renderer2.set_input("color", [0.0, 0.0, 1.0, 1.0])
+            renderer2.set_input("intensity", 0.7)
+            arr2 = np.array(renderer2.render(8, 8).to_pil_image())
+            assert np.allclose(arr1, arr2)
+
     # def test_shader_with_non_constant_loop_condition_fails(self, tmp_path):
     #     """Test that a shader with a non-constant loop condition fails with the expected GLSL error and does not generate an image file."""
         
