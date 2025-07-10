@@ -11,42 +11,24 @@ import pyvvisf
 from PIL import Image
 from pathlib import Path
 
-# A simple animated shader that changes color over time
-shader_content = """
-/*{
-    "DESCRIPTION": "Time-based color animation",
-    "CREDIT": "pyvvisf example",
-    "CATEGORIES": ["Color Effect"],
-    "INPUTS": [
-        {
-            "NAME": "speed",
-            "TYPE": "float",
-            "DEFAULT": 1.0,
-            "MIN": 0.0,
-            "MAX": 5.0
-        }
-    ]
-}*/
+# Select a shader file from the examples/shaders directory
+shader_path = Path(__file__).parent / "shaders" / "simple_color_animation.fs"
+# shader_path = Path(__file__).parent / "shaders" / "shapes.fs"
+# shader_path = Path(__file__).parent / "shaders" / "simple_color_change.fs"
+# shader_path = Path(__file__).parent / "shaders" / "simple.fs"
 
-void main() {
-    // Create a color that changes over time
-    float time = TIME * speed;
-    vec3 color = vec3(
-        0.5 + 0.5 * sin(time),
-        0.5 + 0.5 * sin(time + 2.094), // 2π/3
-        0.5 + 0.5 * sin(time + 4.189)  // 4π/3
-    );
-    
-    gl_FragColor = vec4(color, 1.0);
-}
-"""
+with open(shader_path, "r") as f:
+    shader_content = f.read()
 
 def main():
     print("Rendering shader at different time offsets...")
     
     with pyvvisf.ISFRenderer(shader_content) as renderer:
-        # Set a moderate animation speed
-        renderer.set_input("speed", 0.5)
+        # Set a moderate animation speed if the shader has a 'speed' input
+        try:
+            renderer.set_input("speed", 0.5)
+        except Exception:
+            pass  # Not all shaders have a 'speed' input
         
         # Render at different time offsets
         time_offsets = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]
@@ -61,8 +43,7 @@ def main():
             image.save(output_path)
             print(f"✓ Saved image to: {output_path}")
         
-        print("\nAll images saved! You should see different colors for each time offset.")
-        print("The shader creates a smooth color animation that cycles through RGB values.")
+        print("\nAll images saved! You should see different results for each time offset.")
 
 if __name__ == "__main__":
     main() 

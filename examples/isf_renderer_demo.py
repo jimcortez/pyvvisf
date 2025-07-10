@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demonstration of the ISFRenderer convenience API."""
+"""Demonstration of the ISFRenderer API (updated for latest version)."""
 
 import sys
 from pathlib import Path
@@ -17,96 +17,42 @@ except ImportError as e:
 
 
 def main():
-    """Main demonstration function."""
-    print("pyvvisf ISFRenderer Demo")
+    print("pyvvisf ISFRenderer Demo (Updated)")
     print("=" * 40)
-    
-    # Define a simple shader
-    shader_content = """
-    /*{
-        "DESCRIPTION": "Simple color shader with intensity control",
-        "CREDIT": "pyvvisf example",
-        "CATEGORIES": ["Color Effect"],
-        "INPUTS": [
-            {
-                "NAME": "color",
-                "TYPE": "color",
-                "DEFAULT": [1.0, 0.0, 0.0, 1.0]
-            },
-            {
-                "NAME": "intensity",
-                "TYPE": "float",
-                "DEFAULT": 1.0,
-                "MIN": 0.0,
-                "MAX": 2.0
-            }
-        ]
-    }*/
-    void main() {
-        gl_FragColor = color * vec4(intensity, intensity, intensity, 1.0);
-    }
-    """
-    
-    # Use the ISFRenderer convenience API
+
+    # Select a shader file from the examples/shaders directory
+    shader_path = Path(__file__).parent / "shaders" / "simple_color_change.fs"
+    # shader_path = Path(__file__).parent / "shaders" / "simple_color_animation.fs"
+    # shader_path = Path(__file__).parent / "shaders" / "shapes.fs"
+    # shader_path = Path(__file__).parent / "shaders" / "simple.fs"
+
+    with open(shader_path, "r") as f:
+        shader_content = f.read()
+
     with pyvvisf.ISFRenderer(shader_content) as renderer:
-        print("✓ ISFRenderer initialized")
-        
-        # Set initial input (green)
-        renderer.set_input("color", pyvvisf.ISFColorVal(0.0, 1.0, 0.0, 1.0))
-        print("✓ Set color input to green")
-        
-        # Get shader information
-        info = renderer.get_shader_info()
-        if info:
-            print(f"Shader: {info['name']}")
-            print(f"Description: {info['description']}")
-            print(f"Inputs: {info['inputs']}")
-        
-        # Render the shader
-        print("Rendering shader...")
+        # Render with different color inputs (using Python primitives)
+        renderer.set_input("color", (0.0, 1.0, 0.0, 1.0))  # Green
         buffer = renderer.render(800, 600)
         image = buffer.to_pil_image()
-        print(f"Rendered image size: {image.size}")
-        
-        # Save the image
         output_path = Path(__file__).parent / "output_green.png"
         image.save(output_path)
-        print(f"Saved image to: {output_path}")
-        
-        # Change the color and render again
-        print("\nChanging color to red...")
-        renderer.set_input("color", pyvvisf.ISFColorVal(1.0, 0.0, 0.0, 1.0))
-        
+        print(f"Saved green image to: {output_path}")
+
+        renderer.set_input("color", (1.0, 0.0, 0.0, 1.0))  # Red
         buffer = renderer.render(800, 600)
         image = buffer.to_pil_image()
-        
         output_path = Path(__file__).parent / "output_red.png"
         image.save(output_path)
         print(f"Saved red image to: {output_path}")
-        
-        # Set multiple inputs at once
-        print("\nSetting multiple inputs...")
-        renderer.set_inputs({
-            "color": pyvvisf.ISFColorVal(0.0, 0.0, 1.0, 1.0),  # Blue
-            "intensity": pyvvisf.ISFFloatVal(0.7)  # 70% intensity
-        })
-        
+
+        renderer.set_input("color", (0.0, 0.0, 1.0, 1.0))  # Blue
         buffer = renderer.render(800, 600)
         image = buffer.to_pil_image()
-        
-        output_path = Path(__file__).parent / "output_blue_half.png"
+        output_path = Path(__file__).parent / "output_blue.png"
         image.save(output_path)
-        print(f"✓ Saved blue half-intensity image to: {output_path}")
-        
-        # Show current inputs
-        current_inputs = renderer.get_current_inputs()
-        print(f"Current inputs: {current_inputs}")
-        
-        # Check for errors
-        renderer.check_errors("rendering demo")
-        print("✓ No OpenGL errors detected")
-    
-    print("✓ ISFRenderer cleanup completed")
+        print(f"Saved blue image to: {output_path}")
+
+    print("Demo completed.")
 
 
 if __name__ == "__main__":
