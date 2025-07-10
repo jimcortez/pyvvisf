@@ -276,6 +276,50 @@ class TestISFRendererErrors:
             assert np.allclose(arr[..., 2], 76, atol=2), f"Blue channel not as expected: {arr[..., 2]}"
             assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
 
+    def test_primitive_types_are_accepted_for_inputs(self):
+        """Test that primitive Python types are accepted and coerced for shader inputs."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Primitive input types test",
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]},
+                {"NAME": "point", "TYPE": "point2D", "DEFAULT": [0.5, 0.5]},
+                {"NAME": "scale", "TYPE": "float", "DEFAULT": 1.0},
+                {"NAME": "count", "TYPE": "long", "DEFAULT": 2},
+                {"NAME": "flag", "TYPE": "bool", "DEFAULT": true}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color;
+        }
+        """
+        import pyvvisf
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            # Accept tuple for color
+            renderer.set_input("color", (0.2, 0.4, 0.6, 1.0))
+            # Accept list for point2D
+            renderer.set_input("point", [0.1, 0.9])
+            # Accept float for float
+            renderer.set_input("scale", 2.5)
+            # Accept int for long
+            renderer.set_input("count", 7)
+            # Accept bool for bool
+            renderer.set_input("flag", False)
+            # Accept tuple for point2D
+            renderer.set_input("point", (0.3, 0.7))
+            # Accept list for color (3 elements, should default alpha to 1.0)
+            renderer.set_input("color", [0.1, 0.2, 0.3])
+            # Accept int for float (should coerce)
+            renderer.set_input("scale", 3)
+            # Accept bool for int (should coerce to int 1 or 0)
+            renderer.set_input("count", True)
+            # Accept int for bool (should coerce to bool)
+            renderer.set_input("flag", 0)
+            # Render should not raise
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            assert image.size == (8, 8)
+
     # def test_shader_with_non_constant_loop_condition_fails(self, tmp_path):
     #     """Test that a shader with a non-constant loop condition fails with the expected GLSL error and does not generate an image file."""
         

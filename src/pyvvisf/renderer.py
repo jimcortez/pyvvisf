@@ -6,6 +6,7 @@ import ctypes
 from OpenGL.GL import *
 from typing import Dict, Any, Optional
 import logging
+import OpenGL.GL as GL
 
 from .parser import ISFParser, ISFMetadata
 from .types import ISFValue, ISFColor, ISFPoint2D
@@ -24,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class ShaderManager:
-    """Manages OpenGL shader compilation and linking."""
+    """
+    Manages OpenGL shader compilation, linking, and uniform management.
+    
+    This class handles the compilation of vertex and fragment shaders, linking them into a program,
+    and managing uniform locations and values for efficient rendering.
+    """
     
     expected_input_uniforms: list[str] = []
     def __init__(self):
@@ -34,8 +40,26 @@ class ShaderManager:
         self.uniform_locations = {}
     
     def compile_shader(self, source: str, shader_type: int) -> int:
-        """Compile GLSL shader with detailed error reporting."""
+        """
+        Compile a GLSL shader and check for errors.
+
+        Args:
+            source (str): The GLSL shader source code.
+            shader_type (int): The OpenGL shader type (e.g., GL_VERTEX_SHADER).
+
+        Returns:
+            int: The compiled shader object.
+
+        Raises:
+            ShaderCompilationError: If compilation fails.
+        """
         shader = glCreateShader(shader_type)
+        if shader is None or shader == 0:
+            raise ShaderCompilationError(
+                f"Failed to create shader object (type {self._shader_type_name(shader_type)}).",
+                shader_source=source,
+                shader_type=self._shader_type_name(shader_type)
+            )
         glShaderSource(shader, source)
         glCompileShader(shader)
         
@@ -49,10 +73,23 @@ class ShaderManager:
                 shader_type=self._shader_type_name(shader_type)
             )
         
-        return shader
+        # Ensure we always return an int
+        return int(shader)
     
     def create_program(self, vertex_source: str, fragment_source: str) -> int:
-        """Create and link shader program."""
+        """
+        Create and link a shader program from vertex and fragment sources.
+
+        Args:
+            vertex_source (str): Vertex shader source code.
+            fragment_source (str): Fragment shader source code.
+
+        Returns:
+            int: The linked shader program object.
+
+        Raises:
+            ShaderCompilationError: If linking fails.
+        """
         try:
             # Compile shaders
             self.vertex_shader = self.compile_shader(vertex_source, GL_VERTEX_SHADER)
@@ -60,6 +97,11 @@ class ShaderManager:
             
             # Create and link program
             self.program = glCreateProgram()
+            if self.program is None or self.program == 0:
+                raise ShaderCompilationError(
+                    "Failed to create shader program object.",
+                    shader_source=f"Vertex:\n{vertex_source}\n\nFragment:\n{fragment_source}"
+                )
             glAttachShader(self.program, self.vertex_shader)
             glAttachShader(self.program, self.fragment_shader)
             glLinkProgram(self.program)
@@ -77,7 +119,7 @@ class ShaderManager:
             # Cache uniform locations
             self._cache_uniform_locations()
             
-            return self.program
+            return int(self.program)
             
         except Exception as e:
             self.cleanup()
@@ -112,7 +154,13 @@ class ShaderManager:
                 self.uniform_locations[name] = location
     
     def set_uniform(self, name: str, value: Any):
-        """Set uniform value by name."""
+        """
+        Set the value of a uniform variable by name.
+
+        Args:
+            name (str): The uniform variable name.
+            value (Any): The value to set (type depends on uniform).
+        """
         location = self.uniform_locations.get(name, -1)
         if location == -1:
             return
@@ -120,7 +168,6 @@ class ShaderManager:
     
     def _set_uniform_value(self, location: int, value: Any):
         """Set uniform value based on type."""
-        import OpenGL.GL as GL
         if isinstance(value, bool):
             glUniform1i(location, 1 if value else 0)
         elif isinstance(value, int):
@@ -142,12 +189,16 @@ class ShaderManager:
             logger.warning(f"Unknown uniform type: {type(value)}")
     
     def use(self):
-        """Use this shader program."""
+        """
+        Activate this shader program for subsequent OpenGL calls.
+        """
         if self.program:
             glUseProgram(self.program)
     
     def cleanup(self):
-        """Clean up shader resources."""
+        """
+        Delete all OpenGL resources associated with this shader program.
+        """
         if self.program:
             glDeleteProgram(self.program)
             self.program = None
@@ -171,14 +222,27 @@ class ShaderManager:
 
 
 class GLContextManager:
-    """Manages GLFW OpenGL context."""
+    """
+    Manages the creation and lifetime of a GLFW OpenGL context.
+
+    This class handles window/context creation, activation, and cleanup for offscreen rendering.
+    """
     
     def __init__(self):
         self.window = None
         self.initialized = False
     
     def initialize(self, width: int = 1, height: int = 1):
-        """Initialize GLFW and create OpenGL context."""
+        """
+        Initialize GLFW and create an OpenGL context.
+
+        Args:
+            width (int): Window width (default 1).
+            height (int): Window height (default 1).
+
+        Raises:
+            ContextError: If context creation fails.
+        """
         if self.initialized:
             return
         
@@ -210,7 +274,9 @@ class GLContextManager:
             logger.error("Framebuffer is not complete!")
     
     def cleanup(self):
-        """Clean up GLFW resources."""
+        """
+        Destroy the OpenGL context and release all GLFW resources.
+        """
         if self.window:
             glfw.destroy_window(self.window)
             self.window = None
@@ -220,29 +286,61 @@ class GLContextManager:
             self.initialized = False
     
     def make_current(self):
-        """Make this context current."""
+        """
+        Make this OpenGL context current for the calling thread.
+        """
         if self.window:
             glfw.make_context_current(self.window)
     
     def __enter__(self):
-        """Context manager entry."""
+        """
+        Enter the context manager, returning self.
+        """
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+        """
+        Exit the context manager, cleaning up resources.
+        """
         self.cleanup()
 
 
 class RenderResult:
+    """
+    Wrapper for a rendered image result.
+
+    Provides convenient conversion to PIL Image and NumPy array.
+    """
     def __init__(self, array):
+        """
+        Initialize a RenderResult.
+
+        Args:
+            array (np.ndarray): The rendered image as a NumPy array.
+        """
         self.array = array
     def to_pil_image(self):
+        """
+        Convert the result to a PIL Image in RGBA mode.
+
+        Returns:
+            PIL.Image.Image: The image as a PIL Image.
+        """
         return Image.fromarray(self.array).convert('RGBA')
     def __array__(self):
+        """
+        Return the underlying NumPy array.
+
+        Returns:
+            np.ndarray: The image array.
+        """
         return self.array
 
 class ISFRenderer:
-    """Main ISF shader renderer.
+    """
+    Main ISF shader renderer for Python.
+
+    This class manages the OpenGL context, shader compilation, input validation, and rendering workflow for ISF shaders.
     
     Args:
         shader_content (str): The ISF fragment shader content (required).
@@ -250,6 +348,16 @@ class ISFRenderer:
     """
     
     def __init__(self, shader_content: str = '', vertex_shader_content: str = ''):
+        """
+        Initialize the ISFRenderer with shader content.
+
+        Args:
+            shader_content (str): The ISF fragment shader content.
+            vertex_shader_content (str, optional): Optional vertex shader source.
+
+        Raises:
+            ShaderValidationError: If the shader content is empty or invalid.
+        """
         self.context = GLContextManager()
         self.parser = ISFParser()
         self.shader_manager = None
@@ -292,7 +400,16 @@ class ISFRenderer:
             ) from e
 
     def set_input(self, name: str, value: Any):
-        """Set the value of an input. Reloads shader if input value changes."""
+        """
+        Set the value of a shader input.
+
+        Args:
+            name (str): The input name.
+            value (Any): The value to set (primitive or ISF type).
+
+        Raises:
+            RenderingError: If the input is not found or invalid.
+        """
         if not self.metadata or not self.metadata.inputs:
             raise RenderingError("No shader loaded or shader has no inputs.")
         # Find input definition
@@ -468,7 +585,16 @@ class ISFRenderer:
             self.shader_manager.set_uniform("FRAMEINDEX", 0)   # TODO: Track frame index
 
     def load_shader(self, shader_path: str, vertex_shader_content: str = '') -> ISFMetadata:
-        """Load and parse ISF shader file. Optionally takes a vertex shader source."""
+        """
+        Load and parse an ISF shader from a file.
+
+        Args:
+            shader_path (str): Path to the ISF shader file.
+            vertex_shader_content (str, optional): Optional vertex shader source.
+
+        Returns:
+            ISFMetadata: Parsed shader metadata.
+        """
         glsl_code, metadata = self.parser.parse_file(shader_path)
         # Initialize context if needed
         if not self.context.initialized:
@@ -495,7 +621,16 @@ class ISFRenderer:
         return metadata
 
     def load_shader_content(self, content: str, vertex_shader_content: str = '') -> ISFMetadata:
-        """Load and parse ISF shader content. Optionally takes a vertex shader source."""
+        """
+        Load and parse ISF shader content from a string.
+
+        Args:
+            content (str): The ISF shader content as a string.
+            vertex_shader_content (str, optional): Optional vertex shader source.
+
+        Returns:
+            ISFMetadata: Parsed shader metadata.
+        """
         # Early validation for empty shader content
         if not content or not content.strip():
             raise ShaderValidationError(
@@ -547,13 +682,23 @@ class ISFRenderer:
         self._setup_quad()
         return metadata
     
-    def render(self, 
-               width: int = 1920, 
-               height: int = 1080,
-               inputs: Optional[Dict[str, Any]] = None,
-               metadata: Optional[ISFMetadata] = None,
-               time_offset: float = 0.0) -> 'RenderResult':
-        """Render shader to numpy array (wrapped in RenderResult)."""
+    def render(self, width: int = 1920, height: int = 1080, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0) -> 'RenderResult':
+        """
+        Render the shader to a NumPy array (wrapped in RenderResult).
+
+        Args:
+            width (int): Output image width.
+            height (int): Output image height.
+            inputs (dict, optional): Input values for the shader.
+            metadata (ISFMetadata, optional): Shader metadata.
+            time_offset (float, optional): Time offset for animation.
+
+        Returns:
+            RenderResult: The rendered image result.
+
+        Raises:
+            RenderingError: If rendering fails.
+        """
         if not self.shader_manager:
             raise RenderingError("No shader loaded. Call load_shader() first.")
         # Use self._input_values if inputs not provided
@@ -584,7 +729,7 @@ class ISFRenderer:
         # Set viewport
         glViewport(0, 0, width, height)
         glDisable(GL_DEPTH_TEST)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         # Use shader program
         self.shader_manager.use()
         # Set uniforms
@@ -650,13 +795,17 @@ class ISFRenderer:
             for name, value in inputs.items():
                 self.shader_manager.set_uniform(name, value)
     
-    def save_render(self, 
-                   output_path: str,
-                   width: int = 1920,
-                   height: int = 1080,
-                   inputs: Optional[Dict[str, Any]] = None,
-                   metadata: Optional[ISFMetadata] = None):
-        """Render shader and save to file."""
+    def save_render(self, output_path: str, width: int = 1920, height: int = 1080, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None):
+        """
+        Render the shader and save the result to a file.
+
+        Args:
+            output_path (str): Path to save the output image.
+            width (int): Output image width.
+            height (int): Output image height.
+            inputs (dict, optional): Input values for the shader.
+            metadata (ISFMetadata, optional): Shader metadata.
+        """
         from PIL import Image
         
         render_result = self.render(width, height, inputs, metadata)
@@ -664,7 +813,9 @@ class ISFRenderer:
         image.save(output_path)
     
     def cleanup(self):
-        """Clean up all resources."""
+        """
+        Clean up all OpenGL and rendering resources.
+        """
         if self.shader_manager:
             self.shader_manager.cleanup()
             self.shader_manager = None
@@ -680,9 +831,13 @@ class ISFRenderer:
         self.context.cleanup()
     
     def __enter__(self):
-        """Context manager entry."""
+        """
+        Enter the context manager, returning self.
+        """
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+        """
+        Exit the context manager, cleaning up resources.
+        """
         self.cleanup() 

@@ -144,7 +144,7 @@ def coerce_to_isf_value(value: Any, expected_type: str = "auto") -> ISFValue:
             elif len(value) in (3, 4):
                 return ISFColor.from_tuple(value)
             else:
-                raise ValueError(f"Cannot auto-coerce {len(value)}-element sequence")
+                raise ValueError(f"Cannot auto-coerce {len(value)}-element sequence (got {value!r}). Primitives like int, float, bool, list, or tuple are allowed and will be coerced to the appropriate ISF type if possible.")
         elif isinstance(value, bool):
             return ISFBool(value)
         elif isinstance(value, int):
@@ -152,20 +152,20 @@ def coerce_to_isf_value(value: Any, expected_type: str = "auto") -> ISFValue:
         elif isinstance(value, float):
             return ISFFloat(value)
         else:
-            raise ValueError(f"Cannot auto-coerce {type(value)}")
+            raise ValueError(f"Cannot auto-coerce value of type {type(value)} (got {value!r}). Primitives like int, float, bool, list, or tuple are allowed and will be coerced to the appropriate ISF type if possible.")
     
     # Explicit type coercion
     elif expected_type == "color":
         if isinstance(value, (tuple, list)):
             return ISFColor.from_tuple(value)
         else:
-            raise ValueError(f"Cannot coerce {type(value)} to color")
+            raise ValueError(f"Cannot coerce value of type {type(value)} (got {value!r}) to color. Primitives like list or tuple of 3 or 4 floats are allowed.")
     
     elif expected_type == "point2D":
         if isinstance(value, (tuple, list)):
             return ISFPoint2D.from_tuple(value)
         else:
-            raise ValueError(f"Cannot coerce {type(value)} to point2D")
+            raise ValueError(f"Cannot coerce value of type {type(value)} (got {value!r}) to point2D. Primitives like list or tuple of 2 floats are allowed.")
     
     elif expected_type == "float":
         return ISFFloat(value)

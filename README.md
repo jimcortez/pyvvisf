@@ -78,7 +78,7 @@ with ISFRenderer() as renderer:
     
     # Render with custom parameters
     custom_inputs = {
-        'color': ISFColor.from_rgb(0.0, 1.0, 0.0, 1.0),  # Green
+        'color': [0.0, 1.0, 0.0, 1.0],  # Green
         'scale': 2.0
     }
     
@@ -91,51 +91,6 @@ with ISFRenderer() as renderer:
     # Save to file
     renderer.save_render("output.png", width=512, height=512)
 ```
-
-## API Reference
-
-### Core Classes
-
-#### `ISFRenderer`
-
-Main renderer class for ISF shaders.
-
-```python
-renderer = ISFRenderer()
-```
-
-**Methods:**
-- `load_shader(shader_path: str) -> ISFMetadata`: Load shader from file
-- `load_shader_content(content: str) -> ISFMetadata`: Load shader from string
-- `render(width, height, inputs=None, metadata=None) -> np.ndarray`: Render to numpy array
-- `save_render(output_path, width, height, inputs=None, metadata=None)`: Render and save to file
-
-#### `ISFParser`
-
-Parser for ISF shader files using json5.
-
-```python
-parser = ISFParser()
-glsl_code, metadata = parser.parse_file("shader.fs")
-```
-
-#### Value Types
-
-- `ISFColor(r, g, b, a=1.0)`: RGBA color value
-- `ISFPoint2D(x, y)`: 2D point value
-- `ISFFloat(value)`: Float value
-- `ISFInt(value)`: Integer value
-- `ISFBool(value)`: Boolean value
-
-### Error Handling
-
-The library provides detailed error classes:
-
-- `ISFError`: Base exception for ISF-related errors
-- `ISFParseError`: Error parsing ISF shader content
-- `ShaderCompilationError`: Error compiling or linking shaders
-- `RenderingError`: Error during rendering process
-- `ValidationError`: Error validating ISF metadata or inputs
 
 ## Examples
 
