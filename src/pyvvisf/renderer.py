@@ -4,6 +4,7 @@ import glfw
 import numpy as np
 import ctypes
 from OpenGL.GL import *
+from OpenGL.GL import GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT
 from typing import Dict, Any, Optional
 import logging
 import OpenGL.GL as GL
@@ -444,25 +445,32 @@ class ISFRenderer:
         return '\n'.join(lines)
 
     def _patch_legacy_gl_fragcolor(self, source: str) -> str:
-        """Ensure the fragment shader uses 'out vec4 isf_FragColor;' as the output variable and assignments are to isf_FragColor."""
+        """Patch fragment shader to support legacy gl_FragColor in GLSL 330+ by defining an output variable and macro, and ensure fragColor is written to."""
         lines = source.splitlines()
-        # Insert after #version
-        insert_idx = 0
+        # Find #version line
+        version_idx = None
         for i, line in enumerate(lines):
             if line.strip().startswith('#version'):
-                insert_idx = i + 1
+                version_idx = i
                 break
-        # Always insert the out variable if not present
-        if not any('out vec4 isf_FragColor;' in l for l in lines):
-            lines.insert(insert_idx, 'out vec4 isf_FragColor;')
-            insert_idx += 1
-        # Remove any #define gl_FragColor isf_FragColor lines
-        lines = [l for l in lines if '#define gl_FragColor isf_FragColor' not in l]
-        # Replace all assignments to gl_FragColor and fragColor with isf_FragColor
-        source = '\n'.join(lines)
-        source = source.replace('gl_FragColor', 'isf_FragColor')
-        source = source.replace('fragColor', 'isf_FragColor')
-        return source
+        # Only patch if gl_FragColor is used
+        uses_gl_fragcolor = any('gl_FragColor' in l for l in lines)
+        already_has_out = any('out vec4' in l for l in lines)
+        already_has_define = any('#define gl_FragColor' in l for l in lines)
+        if uses_gl_fragcolor:
+            insert_idx = version_idx + 1 if version_idx is not None else 0
+            if not already_has_out:
+                lines.insert(insert_idx, 'out vec4 fragColor;')
+                insert_idx += 1
+            if not already_has_define:
+                lines.insert(insert_idx, '#define gl_FragColor fragColor')
+            # Ensure that at least one assignment to fragColor exists
+            # If not, replace all assignments to gl_FragColor with fragColor
+            # (This is a safety net for shaders that use gl_FragColor without macro expansion)
+            for i, line in enumerate(lines):
+                if 'gl_FragColor' in line and not line.strip().startswith('#define'):
+                    lines[i] = line.replace('gl_FragColor', 'fragColor')
+        return '\n'.join(lines)
 
     def _inject_uniform_declarations(self, source: str, metadata: ISFMetadata) -> str:
         """Inject uniform declarations for all ISF inputs at the top of the shader."""
@@ -729,7 +737,7 @@ class ISFRenderer:
         # Set viewport
         glViewport(0, 0, width, height)
         glDisable(GL_DEPTH_TEST)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+        glClear(int(GL_COLOR_BUFFER_BIT) | int(GL_DEPTH_BUFFER_BIT))
         # Use shader program
         self.shader_manager.use()
         # Set uniforms
@@ -758,6 +766,62 @@ class ISFRenderer:
             glDeleteTextures(1, [tex])
             logger.error(f"glReadPixels failed or returned unexpected type: {type(data)} value: {data}")
             raise RenderingError("glReadPixels failed to return pixel data.")
+    
+    def render_to_window(self, width: int = 800, height: int = 600, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0, title: str = "ISF Shader Preview"):
+        """
+        Render the shader in a persistent window, updating in real time until the window is closed or ESC is pressed.
+
+        Args:
+            width (int): Window width.
+            height (int): Window height.
+            inputs (dict, optional): Input values for the shader.
+            metadata (ISFMetadata, optional): Shader metadata.
+            time_offset (float, optional): Initial time offset.
+            title (str): Window title.
+        """
+        import time as _time
+        if not self.context.initialized:
+            self.context.initialize(width, height)
+        else:
+            # Resize window if needed
+            if self.context.window:
+                glfw.set_window_size(self.context.window, width, height)
+        glfw.set_window_title(self.context.window, title)
+        if not self.shader_manager:
+            raise RenderingError("No shader loaded. Call load_shader() first.")
+        if inputs is None:
+            inputs = self._input_values
+        if metadata is None:
+            metadata = self.metadata
+        validated_inputs = self.parser.validate_inputs(metadata, inputs) if metadata and inputs else {}
+        start_time = _time.time() - time_offset
+        frame_index = 0
+        while not glfw.window_should_close(self.context.window):
+            glfw.poll_events()
+            # Handle ESC key to close
+            if glfw.get_key(self.context.window, glfw.KEY_ESCAPE) == glfw.PRESS:
+                glfw.set_window_should_close(self.context.window, True)
+                break
+            # Set viewport and clear
+            fb_width, fb_height = glfw.get_framebuffer_size(self.context.window)
+            glViewport(0, 0, fb_width, fb_height)
+            glDisable(GL_DEPTH_TEST)
+            glClear(int(GL_COLOR_BUFFER_BIT) | int(GL_DEPTH_BUFFER_BIT))
+            # Use shader program
+            self.shader_manager.use()
+            # Set uniforms (including time, frame index, etc.)
+            now = _time.time()
+            elapsed = now - start_time
+            self._set_standard_uniforms(width, height, elapsed)
+            self.shader_manager.set_uniform("FRAMEINDEX", frame_index)
+            self._set_input_uniforms(validated_inputs)
+            # Draw quad
+            glBindVertexArray(self.quad_vao)
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+            glBindVertexArray(0)
+            glfw.swap_buffers(self.context.window)
+            frame_index += 1
+        self.cleanup()
     
     def _setup_quad(self):
         """Setup full-screen quad for rendering."""

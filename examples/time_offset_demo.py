@@ -46,7 +46,7 @@ def main():
     
     with pyvvisf.ISFRenderer(shader_content) as renderer:
         # Set a moderate animation speed
-        renderer.set_input("speed", pyvvisf.ISFFloatVal(0.5))
+        renderer.set_input("speed", 0.5)
         
         # Render at different time offsets
         time_offsets = [0.0, 2.0, 4.0, 6.0, 8.0, 10.0]

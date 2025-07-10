@@ -215,9 +215,8 @@ class TestISFRendererErrors:
                 }
             ]
         }*/
-        out vec4 isf_FragColor;
         void main() {
-            isf_FragColor = myColor;
+            gl_FragColor = myColor;
         }
         """
         with pyvvisf.ISFRenderer(shader_content) as renderer:
@@ -399,7 +398,7 @@ def test_minimal_uniform_pipeline():
     #version 330
     uniform vec2 RENDERSIZE;
     void main() {
-        fragColor = myColor;
+        gl_FragColor = myColor;
     }
     """
     with pyvvisf.ISFRenderer(shader_content=fragment_shader, vertex_shader_content=vertex_shader) as renderer:

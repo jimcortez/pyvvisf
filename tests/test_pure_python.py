@@ -21,16 +21,15 @@ class TestISFParser:
         shader_content = """
         /*{"NAME": "SimpleTest", "INPUTS": []}*/
         uniform vec2 RENDERSIZE;
-        out vec4 fragColor;
         
         void main() {
-            fragColor = vec4(1.0, 0.0, 0.0, 1.0);
+            gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
         }
         """
         
         glsl_code, metadata = self.parser.parse_content(shader_content)
         
-        assert "fragColor = vec4(1.0, 0.0, 0.0, 1.0);" in glsl_code
+        assert "gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);" in glsl_code
         assert metadata.name is not None
         assert metadata.inputs is not None
     
@@ -59,10 +58,9 @@ class TestISFParser:
         uniform vec2 RENDERSIZE;
         uniform vec4 color;
         uniform float scale;
-        out vec4 fragColor;
         
         void main() {
-            fragColor = color * scale;
+            gl_FragColor = color * scale;
         }
         """
         
@@ -82,7 +80,7 @@ class TestISFParser:
         # Check that JSON was removed from GLSL
         assert "/*{" not in glsl_code
         assert "}*/" not in glsl_code
-        assert "fragColor = color * scale;" in glsl_code
+        assert "gl_FragColor = color * scale;" in glsl_code
     
     def test_parse_invalid_json(self):
         """Test parsing with invalid JSON metadata."""

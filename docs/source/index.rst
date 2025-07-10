@@ -37,7 +37,7 @@ Basic Usage
     }*/
 
     void main() {
-        isf_FragColor = color;
+        gl_FragColor = color;
     }
     """
 
