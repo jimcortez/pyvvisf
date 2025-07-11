@@ -1,3 +1,7 @@
+[![Read the Docs](https://readthedocs.org/projects/pyvvisf/badge/?version=latest)](https://pyvvisf.readthedocs.io/)
+[![GitHub release](https://img.shields.io/github/v/release/jimcortez/pyvvisf?style=flat)](https://github.com/jimcortez/pyvvisf/releases)
+[![PyPI version](https://img.shields.io/pypi/v/pyvvisf.svg)](https://pypi.org/project/pyvvisf/)
+
 # pyvvisf
 
 Python ISF shader renderer with PyOpenGL. Render images from your shaders, or visualize in a window.
