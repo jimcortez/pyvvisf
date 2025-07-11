@@ -25,6 +25,9 @@ The majority of code in this repository was built with AI.
 - **Type safety**: Pydantic models for metadata validation
 - **Auto-coercion**: Automatic type conversion for shader inputs
 - **Context management**: Automatic resource cleanup
+- **GLSL version support**: Automatic detection and support for multiple GLSL versions
+- **ISF 2.0 compliance**: Full support for ISF 2.0 specification including multi-pass rendering and imports
+- **ISF special functions**: Support for IMG_THIS_PIXEL, IMG_PIXEL, IMG_SIZE, and other ISF functions
 
 ## Installation
 
@@ -76,6 +79,23 @@ with ISFRenderer(test_shader) as renderer:
     image.save("output_green.png")
 ```
 
+## GLSL Version Support
+
+pyvvisf supports multiple GLSL versions and can automatically detect which versions are supported on your system:
+
+```python
+from pyvvisf import get_supported_glsl_versions, ISFRenderer
+
+# Check which GLSL versions are supported
+supported_versions = get_supported_glsl_versions()
+print(f"Supported GLSL versions: {supported_versions}")
+
+# Create renderer with specific GLSL version
+renderer = ISFRenderer(shader_content, glsl_version='330')
+```
+
+The default GLSL version is '330', but you can specify any supported version. The library will automatically test shader compilation to ensure compatibility.
+
 ## Examples
 
 See the `examples/` directory for complete examples:
@@ -111,7 +131,10 @@ pyvvisf/
 │   ├── renderer.py      # Main renderer
 │   ├── parser.py        # ISF parser with json5
 │   ├── types.py         # Value types
-│   └── errors.py        # Error handling
+│   ├── errors.py        # Error handling
+│   ├── shader_compiler.py # Shader compilation and processing
+│   ├── framebuffer_manager.py # Framebuffer management
+│   └── input_manager.py # Input validation and management
 ├── examples/
 ├── tests/
 └── docs/
@@ -121,6 +144,9 @@ pyvvisf/
 
 MIT License - see LICENSE file for details.
 
-## Contributing
+## Special Thanks
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
+- https://github.com/mrRay/VVISF-GL for initial reference implementation
+- https://github.com/msfeldstein/interactive-shader-format-js for another reference implementation
+- https://github.com/mcfletch/pyopengl for all the bindings
+- https://github.com/FlorianRhiem/pyGLFW for the bindings

@@ -62,6 +62,24 @@ Here's a minimal example using a well-formed ISF shader:
         image = buffer.to_pil_image()
         image.save("output_green.png")
 
+GLSL Version Support
+~~~~~~~~~~~~~~~~~~~
+
+pyvvisf supports multiple GLSL versions and can automatically detect which versions are supported on your system:
+
+.. code-block:: python
+
+    from pyvvisf import get_supported_glsl_versions, ISFRenderer
+
+    # Check which GLSL versions are supported
+    supported_versions = get_supported_glsl_versions()
+    print(f"Supported GLSL versions: {supported_versions}")
+
+    # Create renderer with specific GLSL version
+    renderer = ISFRenderer(shader_content, glsl_version='330')
+
+The default GLSL version is '330', but you can specify any supported version. The library will automatically test shader compilation to ensure compatibility.
+
 Examples
 ~~~~~~~~
 
@@ -107,6 +125,17 @@ Examples:
 The :meth:`set_inputs` method is a convenience function that takes a dictionary of input names and values, and calls :meth:`set_input` for each one. This is useful for updating several shader parameters in a single call.
 
 You do not need to use ISFColor, ISFPoint2D, or other ISF value classes directly.
+
+ISF Features
+-----------
+
+pyvvisf supports the full ISF 2.0 specification including:
+
+- **Multi-pass rendering**: Shaders with multiple render passes
+- **ISF imports**: Support for imported textures and shaders
+- **ISF special functions**: IMG_THIS_PIXEL, IMG_PIXEL, IMG_SIZE, etc.
+- **ISF sampling functions**: VVSAMPLER_2DBYPIXEL, VVSAMPLER_2DBYNORM
+- **Modern GLSL**: Support for GLSL 330+ with proper ISF 2.0 compatibility
 
 Value Types
 -----------
@@ -196,4 +225,9 @@ API Details
 .. autoclass:: pyvvisf.RenderingError
     :members:
     :undoc-members:
-    :show-inheritance: 
+    :show-inheritance:
+
+Utility Functions
+================
+
+.. autofunction:: pyvvisf.get_supported_glsl_versions 
