@@ -1,4 +1,0 @@
-[submodule "external/VVISF-GL"]
-	path = external/VVISF-GL
-	url = https://github.com/mrRay/VVISF-GL.git
-	branch = master 
