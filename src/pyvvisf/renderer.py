@@ -815,7 +815,13 @@ class ISFRenderer:
             inputs = self._input_values
         if metadata is None:
             metadata = self.metadata
-        validated_inputs = self.parser.validate_inputs(metadata, inputs) if metadata and inputs else {}
+        # Merge user inputs with defaults from metadata.inputs (like render())
+        merged_inputs = dict(inputs) if inputs else {}
+        if metadata and metadata.inputs:
+            for input_def in metadata.inputs:
+                if input_def.name not in merged_inputs and input_def.default is not None:
+                    merged_inputs[input_def.name] = input_def.default
+        validated_inputs = self.parser.validate_inputs(metadata, merged_inputs) if metadata and merged_inputs else {}
         start_time = _time.time() - time_offset
         frame_index = 0
         while not glfw.window_should_close(self.context.window):
