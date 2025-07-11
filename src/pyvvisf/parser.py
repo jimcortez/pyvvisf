@@ -16,11 +16,11 @@ class ISFInput(BaseModel):
     type: Optional[str] = None
     label: Optional[str] = None
     default: Optional[Any] = None
-    min: Optional[float] = None
-    max: Optional[float] = None
+    min: Optional[Any] = None  # PATCH: allow float or list for point2D
+    max: Optional[Any] = None  # PATCH: allow float or list for point2D
     values: Optional[List[Any]] = None
     identity: Optional[bool] = None
-    
+
     @field_validator('type')
     @classmethod
     def validate_type(cls, v, info):
@@ -39,6 +39,32 @@ class ISFInput(BaseModel):
                 coerce_to_isf_value(v, expected_type)
             except ValueError as e:
                 raise ValueError(f"Invalid default value for type {expected_type}: {e}")
+        return v
+
+    @field_validator('min')
+    @classmethod
+    def validate_min(cls, v, info):
+        type_value = info.data.get('type') if hasattr(info, 'data') else None
+        if v is not None:
+            if type_value == 'point2D':
+                if not (isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) for x in v)):
+                    raise ValueError(f"min for point2D must be a list or tuple of two numbers, got {v}")
+            else:
+                if not isinstance(v, (int, float)):
+                    raise ValueError(f"min for type {type_value} must be a number, got {v}")
+        return v
+
+    @field_validator('max')
+    @classmethod
+    def validate_max(cls, v, info):
+        type_value = info.data.get('type') if hasattr(info, 'data') else None
+        if v is not None:
+            if type_value == 'point2D':
+                if not (isinstance(v, (list, tuple)) and len(v) == 2 and all(isinstance(x, (int, float)) for x in v)):
+                    raise ValueError(f"max for point2D must be a list or tuple of two numbers, got {v}")
+            else:
+                if not isinstance(v, (int, float)):
+                    raise ValueError(f"max for type {type_value} must be a number, got {v}")
         return v
 
 

@@ -746,10 +746,17 @@ class ShaderCompiler:
         location = self.uniform_locations.get(name, -1)
         if location == -1:
             return
-            
-        from .types import ISFColor, ISFPoint2D
-        
+
+        from .types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
+
         try:
+            # Unwrap ISF value types to their underlying Python values
+            if isinstance(value, ISFFloat):
+                value = value.value
+            elif isinstance(value, ISFInt):
+                value = value.value
+            elif isinstance(value, ISFBool):
+                value = value.value
             if isinstance(value, bool):
                 glUniform1i(location, 1 if value else 0)
             elif isinstance(value, int):
