@@ -2,7 +2,7 @@ name: Build wheels
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   release:
@@ -28,20 +28,13 @@ jobs:
 
     - name: Build wheel and sdist
       run: |
-        python -m build --wheel
-        python -m build --sdist
+        python -m build
 
-    - name: Upload wheel
+    - name: Upload distributions
       uses: actions/upload-artifact@v4
       with:
-        name: wheel
-        path: dist/*.whl
-
-    - name: Upload sdist
-      uses: actions/upload-artifact@v4
-      with:
-        name: sdist
-        path: dist/*.tar.gz
+        name: release-dists
+        path: dist/
 
     - name: Install test dependencies
       run: |
@@ -60,12 +53,14 @@ jobs:
     runs-on: ubuntu-latest
     environment: deployment
     if: github.event_name == 'release'
+    permissions:
+      id-token: write
     steps:
-    - name: Download all artifacts
+    - name: Retrieve release distributions
       uses: actions/download-artifact@v4
-
-    - name: Upload to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
-        packages-dir: dist/ 
+        name: release-dists
+        path: dist/
+
+    - name: Publish release distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1 
