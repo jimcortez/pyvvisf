@@ -24,6 +24,9 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# Ensure GL_TEXTURE0 is int for arithmetic
+GL_TEXTURE0 = int(GL_TEXTURE0)
+
 
 class ShaderManager:
     """
@@ -411,6 +414,7 @@ class ISFRenderer:
         Raises:
             RenderingError: If the input is not found or invalid.
         """
+        self.context.make_current()  # Ensure correct OpenGL context
         if not self.metadata or not self.metadata.inputs:
             raise RenderingError("No shader loaded or shader has no inputs.")
         # Find input definition
@@ -444,6 +448,7 @@ class ISFRenderer:
             TypeError: If inputs is not a dictionary.
             RenderingError: If any input is not found or invalid (from set_input).
         """
+        self.context.make_current()  # Ensure correct OpenGL context
         if not isinstance(inputs, dict):
             raise TypeError("inputs must be a dictionary of input names to values")
         for name, value in inputs.items():
@@ -545,8 +550,8 @@ class ISFRenderer:
                 lines.insert(insert_idx, f"uniform {dtype} {name};")
                 insert_idx += 1
         # Inject isf_FragNormCoord as in/varying if not present
-        # Only inject if referenced in the shader
-        frag_norm_coord_needed = any('isf_FragNormCoord' in l for l in lines)
+        # Only inject if referenced in the shader (directly or via IMG_THIS_NORM_PIXEL)
+        frag_norm_coord_needed = any('isf_FragNormCoord' in l or 'IMG_THIS_NORM_PIXEL' in l for l in lines)
         if frag_norm_coord_needed and not any("in vec2 isf_FragNormCoord;" in l for l in lines):
             lines.insert(insert_idx, "in vec2 isf_FragNormCoord;")
             insert_idx += 1
@@ -635,59 +640,21 @@ class ISFRenderer:
         glsl_code = self._patch_legacy_gl_fragcolor(glsl_code)
         glsl_code = self._inject_uniform_declarations(glsl_code, metadata)
         glsl_code = self._inject_standard_uniforms(glsl_code)
-        self.shader_manager = ShaderManager()
-        # Provide expected input uniforms for caching
-        if hasattr(metadata, 'inputs') and metadata.inputs:
-            self.shader_manager.expected_input_uniforms = [inp.name for inp in metadata.inputs]
-        self.shader_manager.create_program(vertex_source, glsl_code)
-        # Setup rendering quad
-        self._setup_quad()
-        return metadata
-
-    def load_shader_content(self, content: str, vertex_shader_content: str = '') -> ISFMetadata:
-        """
-        Load and parse ISF shader content from a string.
-
-        Args:
-            content (str): The ISF shader content as a string.
-            vertex_shader_content (str, optional): Optional vertex shader source.
-
-        Returns:
-            ISFMetadata: Parsed shader metadata.
-        """
-        # Early validation for empty shader content
-        if not content or not content.strip():
-            raise ShaderValidationError(
-                "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
-                shader_source=content,
-                shader_type="fragment"
-            )
-        try:
-            glsl_code, metadata = self.parser.parse_content(content)
-        except ISFParseError:
-            # Let ISFParseError propagate directly
-            raise
-        except Exception as e:
-            raise ShaderValidationError(
-                f"Shader parsing failed: {e}",
-                shader_source=content,
-                shader_type="fragment"
-            ) from e
-        # Initialize context if needed
-        if not self.context.initialized:
-            self.context.initialize()
-        # Compile shaders
-        if vertex_shader_content:
-            vertex_source = vertex_shader_content
-        else:
-            vertex_source = metadata.vertex_shader or self.default_vertex_shader()
-        vertex_source = self._ensure_version_directive(vertex_source)
-        vertex_source = self._inject_isf_vertShaderInit(vertex_source)
-        vertex_source = self._inject_uniform_declarations(vertex_source, metadata)
-        glsl_code = self._ensure_version_directive(glsl_code)
-        glsl_code = self._patch_legacy_gl_fragcolor(glsl_code)
-        glsl_code = self._inject_uniform_declarations(glsl_code, metadata)
-        glsl_code = self._inject_standard_uniforms(glsl_code)
+        # For multi-pass shaders, inject all previous pass target uniforms for validation
+        if hasattr(metadata, 'passes') and metadata.passes and len(metadata.passes) > 1:
+            reserved_words = {'default'}
+            all_targets = []
+            for p in metadata.passes:
+                t = None
+                if hasattr(p, 'target'):
+                    t = getattr(p, 'target', None)
+                elif isinstance(p, dict):
+                    t = p.get('target')
+                if t is not None and t not in all_targets and t not in reserved_words:
+                    all_targets.append(t)
+            glsl_code = self._inject_pass_target_uniforms(glsl_code, all_targets)
+        # Inject ISF macros before validation
+        glsl_code = self._inject_isf_macros(glsl_code)
         logger.debug("Vertex Shader Source:\n" + vertex_source)
         logger.debug("Fragment Shader Source:\n" + glsl_code)
         self.shader_manager = ShaderManager()
@@ -705,89 +672,274 @@ class ISFRenderer:
         # Setup rendering quad
         self._setup_quad()
         return metadata
-    
-    def render(self, width: int = 1920, height: int = 1080, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0) -> 'RenderResult':
-        """
-        Render the shader to a NumPy array (wrapped in RenderResult).
 
+    def render(self, width: int, height: int, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0) -> RenderResult:
+        """
+        Render the ISF shader to an offscreen buffer and return the result as a numpy array.
         Args:
             width (int): Output image width.
             height (int): Output image height.
             inputs (dict, optional): Input values for the shader.
             metadata (ISFMetadata, optional): Shader metadata.
             time_offset (float, optional): Time offset for animation.
-
         Returns:
-            RenderResult: The rendered image result.
-
-        Raises:
-            RenderingError: If rendering fails.
+            RenderResult: The rendered image as a numpy array.
         """
-        if not self.shader_manager:
-            raise RenderingError("No shader loaded. Call load_shader() first.")
-        # Use self._input_values if inputs not provided
+        self.context.make_current()  # Ensure correct OpenGL context
+        # Ensure context is initialized
+        if not self.context.initialized:
+            self.context.initialize(width, height)
+        else:
+            # Resize window if needed
+            if self.context.window:
+                glfw.set_window_size(self.context.window, width, height)
+        glfw.make_context_current(self.context.window)
+
+        # Prepare inputs
         if inputs is None:
             inputs = self._input_values
-        # Use self.metadata if metadata not provided
         if metadata is None:
             metadata = self.metadata
-        
+        # Merge user inputs with defaults from metadata.inputs
         merged_inputs = dict(inputs) if inputs else {}
         if metadata and metadata.inputs:
             for input_def in metadata.inputs:
                 if input_def.name not in merged_inputs and input_def.default is not None:
                     merged_inputs[input_def.name] = input_def.default
-        # Validate inputs
-        if metadata and merged_inputs:
-            validated_inputs = self.parser.validate_inputs(metadata, merged_inputs)
+        validated_inputs = self.parser.validate_inputs(metadata, merged_inputs) if metadata and merged_inputs else {}
+
+        # Multi-pass rendering logic
+        passes = getattr(metadata, 'passes', None)
+        if passes and len(passes) > 1:
+            # Multi-pass: render each pass to its own framebuffer/texture
+            pass_targets = []
+            pass_fbos = []
+            pass_textures = []
+            pass_target_names = []
+            # Gather all pass target names (None for default/final pass)
+            for p in passes:
+                t = None
+                if hasattr(p, 'target'):
+                    t = getattr(p, 'target', None)
+                elif isinstance(p, dict):
+                    t = p.get('target')
+                pass_target_names.append(t)
+            # For each pass, create framebuffer/texture if it has a target
+            for i, tname in enumerate(pass_target_names):
+                if tname is not None:
+                    # Create framebuffer and texture for this pass
+                    fbo = glGenFramebuffers(1)
+                    glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+                    tex = glGenTextures(1)
+                    glBindTexture(GL_TEXTURE_2D, tex)
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+                    status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+                    if status != GL_FRAMEBUFFER_COMPLETE:
+                        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                        glDeleteFramebuffers(1, [fbo])
+                        glDeleteTextures(1, [tex])
+                        raise RenderingError(f"Framebuffer is not complete for pass {i}: status={status}")
+                    pass_fbos.append(fbo)
+                    pass_textures.append(tex)
+                    pass_targets.append(tname)
+                else:
+                    pass_fbos.append(None)
+                    pass_textures.append(None)
+                    pass_targets.append(None)
+            # Dictionary to map target name to texture id
+            target_texture_map = {}
+            # Render each pass
+            for pass_idx, p in enumerate(passes):
+                # Bind framebuffer for this pass (if any), else default framebuffer
+                fbo = pass_fbos[pass_idx]
+                if fbo is not None:
+                    glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+                else:
+                    # For the final pass (no target), render to a new framebuffer/texture
+                    fbo = glGenFramebuffers(1)
+                    glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+                    tex = glGenTextures(1)
+                    glBindTexture(GL_TEXTURE_2D, tex)
+                    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+                    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+                    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+                    status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+                    if status != GL_FRAMEBUFFER_COMPLETE:
+                        glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                        glDeleteFramebuffers(1, [fbo])
+                        glDeleteTextures(1, [tex])
+                        raise RenderingError(f"Framebuffer is not complete for final pass: status={status}")
+                    pass_fbos[pass_idx] = fbo
+                    pass_textures[pass_idx] = tex
+                # Set viewport and clear
+                glViewport(0, 0, width, height)
+                glDisable(GL_DEPTH_TEST)
+                glClear(int(GL_COLOR_BUFFER_BIT) | int(GL_DEPTH_BUFFER_BIT))
+                # Use shader program
+                if self.shader_manager is not None:
+                    self.shader_manager.use()
+                else:
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                    raise RenderingError("No shader program loaded.")
+                # Set uniforms (including time, frame index, etc.)
+                self._set_standard_uniforms(width, height, time_offset)
+                if self.shader_manager is not None:
+                    self.shader_manager.set_uniform("FRAMEINDEX", 0)
+                    self.shader_manager.set_uniform("PASSINDEX", pass_idx)
+                self._set_input_uniforms(validated_inputs)
+                # Bind previous pass targets as textures
+                tex_unit = 1  # 0 is reserved for user input images
+                for prev_idx, tname in enumerate(pass_targets):
+                    if isinstance(tname, str) and tname in target_texture_map:
+                        glActiveTexture(int(GL_TEXTURE0) + tex_unit)
+                        glBindTexture(GL_TEXTURE_2D, target_texture_map[tname])
+                        # Set the uniform sampler2D for this target to the correct texture unit
+                        if self.shader_manager is not None:
+                            self.shader_manager.set_uniform(tname, tex_unit)
+                        tex_unit += 1
+                # Draw quad
+                glBindVertexArray(self.quad_vao)
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+                glBindVertexArray(0)
+                # After rendering, if this pass has a target, store its texture for use in later passes
+                tname = pass_targets[pass_idx]
+                if tname is not None:
+                    target_texture_map[tname] = pass_textures[pass_idx]
+            # Read pixels from the last pass's framebuffer
+            final_fbo = pass_fbos[-1]
+            glBindFramebuffer(GL_FRAMEBUFFER, final_fbo)
+            data = glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE)
+            if not isinstance(data, (bytes, bytearray)):
+                data = bytes(data)
+            arr = np.frombuffer(data, dtype=np.uint8).reshape((height, width, 4))
+            arr = np.flipud(arr)
+            # Cleanup all framebuffers and textures
+            for fbo in pass_fbos:
+                if fbo is not None:
+                    glDeleteFramebuffers(1, [fbo])
+            for tex in pass_textures:
+                if tex is not None:
+                    glDeleteTextures(1, [tex])
+            return RenderResult(arr)
         else:
-            validated_inputs = {}
-        # --- Offscreen FBO/texture setup ---
-        fbo = glGenFramebuffers(1)
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo)
-        tex = glGenTextures(1)
-        glBindTexture(GL_TEXTURE_2D, tex)
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
-        status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
-        if status != GL_FRAMEBUFFER_COMPLETE:
-            glDeleteFramebuffers(1, [fbo])
-            glDeleteTextures(1, [tex])
-            raise RenderingError("Framebuffer is not complete for offscreen rendering.")
-        # Set viewport
-        glViewport(0, 0, width, height)
-        glDisable(GL_DEPTH_TEST)
-        glClear(int(GL_COLOR_BUFFER_BIT) | int(GL_DEPTH_BUFFER_BIT))
-        # Use shader program
-        self.shader_manager.use()
-        # Set uniforms
-        self._set_standard_uniforms(width, height, time_offset)
-        self._set_input_uniforms(validated_inputs)
-        # Draw the quad
-        glBindVertexArray(self.quad_vao)
-        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
-        glBindVertexArray(0)
-        glFlush()
-        glFinish()
-        # Read pixels from FBO
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo)
-        data = glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE)
-        if isinstance(data, bytes):
-            image_array = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 4)
-            image_array = np.flipud(image_array)
-            # Cleanup FBO/texture
+            # Single-pass: current logic
+            # Setup framebuffer
+            fbo = glGenFramebuffers(1)
+            glBindFramebuffer(GL_FRAMEBUFFER, fbo)
+            # Create texture to render to
+            tex = glGenTextures(1)
+            glBindTexture(GL_TEXTURE_2D, tex)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+            # Check framebuffer completeness
+            status = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+            if status != GL_FRAMEBUFFER_COMPLETE:
+                glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                glDeleteFramebuffers(1, [fbo])
+                glDeleteTextures(1, [tex])
+                raise RenderingError(f"Framebuffer is not complete: status={status}")
+            # Set viewport and clear
+            glViewport(0, 0, width, height)
+            glDisable(GL_DEPTH_TEST)
+            glClear(int(GL_COLOR_BUFFER_BIT) | int(GL_DEPTH_BUFFER_BIT))
+            # Use shader program
+            if self.shader_manager is not None:
+                self.shader_manager.use()
+            else:
+                glBindFramebuffer(GL_FRAMEBUFFER, 0)
+                glDeleteFramebuffers(1, [fbo])
+                glDeleteTextures(1, [tex])
+                raise RenderingError("No shader program loaded.")
+            # Set uniforms (including time, frame index, etc.)
+            self._set_standard_uniforms(width, height, time_offset)
+            if self.shader_manager is not None:
+                self.shader_manager.set_uniform("FRAMEINDEX", 0)
+            self._set_input_uniforms(validated_inputs)
+            # Draw quad
+            glBindVertexArray(self.quad_vao)
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+            glBindVertexArray(0)
+            # Read pixels
+            data = glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE)
+            if not isinstance(data, (bytes, bytearray)):
+                data = bytes(data)
+            arr = np.frombuffer(data, dtype=np.uint8).reshape((height, width, 4))
+            # OpenGL's origin is bottom-left, so flip vertically
+            arr = np.flipud(arr)
+            # Cleanup framebuffer and texture
             glBindFramebuffer(GL_FRAMEBUFFER, 0)
             glDeleteFramebuffers(1, [fbo])
             glDeleteTextures(1, [tex])
-            return RenderResult(image_array)
+            return RenderResult(arr)
+
+    def load_shader_content(self, content: str, vertex_shader_content: str = '') -> ISFMetadata:
+        """
+        Parse and validate ISF shader content, compile for validation only, and store metadata and shader source.
+        """
+        if not content or not content.strip():
+            raise ShaderValidationError(
+                "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
+                shader_source=content,
+                shader_type="fragment"
+            )
+        try:
+            glsl_code, metadata = self.parser.parse_content(content)
+        except ISFParseError:
+            raise
+        except Exception as e:
+            raise ShaderValidationError(
+                f"Shader parsing failed: {e}",
+                shader_source=content,
+                shader_type="fragment"
+            ) from e
+        if not self.context.initialized:
+            self.context.initialize()
+        if vertex_shader_content:
+            vertex_source = vertex_shader_content
         else:
-            glBindFramebuffer(GL_FRAMEBUFFER, 0)
-            glDeleteFramebuffers(1, [fbo])
-            glDeleteTextures(1, [tex])
-            logger.error(f"glReadPixels failed or returned unexpected type: {type(data)} value: {data}")
-            raise RenderingError("glReadPixels failed to return pixel data.")
+            vertex_source = metadata.vertex_shader or self.default_vertex_shader()
+        vertex_source = self._ensure_version_directive(vertex_source)
+        vertex_source = self._inject_isf_vertShaderInit(vertex_source)
+        vertex_source = self._inject_uniform_declarations(vertex_source, metadata)
+        # --- MACRO INJECTION ORDER FIX ---
+        glsl_code = self._ensure_version_directive(glsl_code)
+        glsl_code = self._inject_isf_macros(glsl_code)
+        glsl_code = self._patch_legacy_gl_fragcolor(glsl_code)
+        glsl_code = self._inject_uniform_declarations(glsl_code, metadata)
+        glsl_code = self._inject_standard_uniforms(glsl_code)
+        if hasattr(metadata, 'passes') and metadata.passes and len(metadata.passes) > 1:
+            reserved_words = {'default'}
+            all_targets = []
+            for p in metadata.passes:
+                t = None
+                if hasattr(p, 'target'):
+                    t = getattr(p, 'target', None)
+                elif isinstance(p, dict):
+                    t = p.get('target')
+                if t is not None and t not in all_targets and t not in reserved_words:
+                    all_targets.append(t)
+            glsl_code = self._inject_pass_target_uniforms(glsl_code, all_targets)
+        self.shader_manager = ShaderManager()
+        if hasattr(metadata, 'inputs') and metadata.inputs:
+            self.shader_manager.expected_input_uniforms = [inp.name for inp in metadata.inputs]
+        try:
+            self.shader_manager.create_program(vertex_source, glsl_code)
+        except ShaderCompilationError as e:
+            raise ShaderValidationError(
+                f"Shader compilation failed: {e}",
+                shader_source=glsl_code,
+                shader_type="fragment"
+            ) from e
+        self._setup_quad()
+        self.metadata = metadata
+        self._shader_content = content
+        return metadata
     
     def render_to_window(self, width: int = 800, height: int = 600, inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0, title: str = "ISF Shader Preview"):
         """
@@ -933,3 +1085,46 @@ class ISFRenderer:
         Exit the context manager, cleaning up resources.
         """
         self.cleanup() 
+
+    def _inject_pass_target_uniforms(self, source: str, targets: list[str]) -> str:
+        """Inject uniform declarations for all previous pass targets."""
+        if not targets:
+            return source
+        uniform_lines = []
+        for target_name in targets:
+            uniform_lines.append(f"uniform sampler2D {target_name};")
+        # Insert after #version and any out variable
+        lines = source.splitlines()
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version'):
+                insert_idx = i + 1
+            elif line.strip().startswith('out vec4 fragColor;'):
+                insert_idx = i + 1
+        for j, uline in enumerate(uniform_lines):
+            lines.insert(insert_idx + j, uline)
+        return '\n'.join(lines)
+
+    def _inject_isf_macros(self, source: str) -> str:
+        """Inject ISF macros (like IMG_THIS_NORM_PIXEL, IMG_PIXEL, IMG_NORM_PIXEL, IMG_SIZE) into the shader if any are referenced, and always inject all in dependency order if any are used."""
+        lines = source.splitlines()
+        insert_idx = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith('#version'):
+                insert_idx = i + 1
+                break
+        # List of all ISF macros and their definitions, in dependency order
+        macro_defs = [
+            ('IMG_NORM_PIXEL', '#define IMG_NORM_PIXEL(image, normCoord) texture(image, normCoord)'),
+            ('IMG_THIS_NORM_PIXEL', '#define IMG_THIS_NORM_PIXEL(image) IMG_NORM_PIXEL(image, isf_FragNormCoord)'),
+            ('IMG_PIXEL', '#define IMG_PIXEL(image, coord) texture(image, (coord) / RENDERSIZE)'),
+            ('IMG_THIS_PIXEL', '#define IMG_THIS_PIXEL(image) IMG_PIXEL(image, gl_FragCoord.xy)'),
+            ('IMG_SIZE', '#define IMG_SIZE(image) RENDERSIZE'),
+        ]
+        # If any macro is referenced, inject all
+        macro_names = [name for name, _ in macro_defs]
+        if any(any(macro in l for macro in macro_names) for l in lines):
+            for _, macro in macro_defs:
+                lines.insert(insert_idx, macro)
+                insert_idx += 1
+        return '\n'.join(lines) 
