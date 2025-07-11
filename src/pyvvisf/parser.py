@@ -46,7 +46,7 @@ class ISFPass(BaseModel):
     """ISF render pass definition."""
     target: Optional[str] = None
     persistent: Optional[bool] = None
-    float: Optional[bool] = None
+    float_buffer: Optional[bool] = None  # Renamed from 'float' to avoid shadowing built-in
     width: Optional[int] = None
     height: Optional[int] = None
     scaleX: Optional[float] = None
@@ -92,12 +92,64 @@ class ISFMetadata(BaseModel):
                 raise ValueError("Input names must be unique")
         return v
 
+    @field_validator('passes')
+    @classmethod
+    def validate_passes(cls, v, info):
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("PASSES must be a list of pass objects.")
+        allowed_fields = {
+            'target', 'persistent', 'float_buffer', 'width', 'height', 'scaleX', 'scaleY',
+            'scaleToFit', 'scaleToFill', 'scaleToFitX', 'scaleToFitY', 'scaleToFillX',
+            'scaleToFillY', 'scaleToFitAspectRatio', 'scaleToFillAspectRatio', 'filter'
+        }
+        target_names = set()
+        for i, p in enumerate(v):
+            if not isinstance(p, ISFPass):
+                raise ValueError(f"Each pass must be an ISFPass object (got {type(p)} at index {i}).")
+            # Runtime check: get all fields present in the ISFPass instance
+            for field in p.__dict__.keys():
+                if field not in allowed_fields:
+                    raise ValueError(f"Invalid field '{field}' in PASSES[{i}]. Allowed fields: {sorted(allowed_fields)}")
+            # TARGET validation
+            if p.target is not None:
+                if not isinstance(p.target, str):
+                    raise ValueError(f"PASSES[{i}]: TARGET must be a string if present.")
+                if p.target in target_names:
+                    raise ValueError(f"Duplicate TARGET name '{p.target}' in PASSES.")
+                target_names.add(p.target)
+            # WIDTH/HEIGHT validation
+            for dim in ('width', 'height'):
+                val = getattr(p, dim)
+                if val is not None:
+                    if isinstance(val, (int, float)):
+                        if val <= 0:
+                            raise ValueError(f"PASSES[{i}]: {dim.upper()} must be positive if specified.")
+                    elif isinstance(val, str):
+                        # Accept ISF expressions like "$WIDTH/2.0"
+                        if not val.startswith('$'):
+                            raise ValueError(f"PASSES[{i}]: {dim.upper()} string must start with '$' for ISF expressions.")
+                    else:
+                        raise ValueError(f"PASSES[{i}]: {dim.upper()} must be a number or ISF expression string.")
+            # PERSISTENT/FLOAT_BUFFER validation
+            for bfield in ('persistent', 'float_buffer'):
+                bval = getattr(p, bfield)
+                if bval is not None and not isinstance(bval, bool):
+                    raise ValueError(f"PASSES[{i}]: {bfield.upper()} must be a boolean if specified.")
+            # FILTER validation
+            if p.filter is not None and not isinstance(p.filter, str):
+                raise ValueError(f"PASSES[{i}]: FILTER must be a string if specified.")
+        if len(v) == 0:
+            raise ValueError("PASSES must contain at least one pass object.")
+        return v
+
 
 class ISFParser:
     """Parser for ISF shader files using json5."""
     
     def __init__(self):
-        self.json_pattern = re.compile(r'/\*\{([\s\S]*?)\}\*/')
+        self.json_pattern = re.compile(r'/\*\{([\s\S]*?)\}\*/?')  # non-greedy, match first only
     
     def parse_file(self, file_path: str) -> Tuple[str, ISFMetadata]:
         """Parse an ISF shader file and return GLSL code and metadata."""
@@ -112,6 +164,7 @@ class ISFParser:
         """Parse ISF shader content and return GLSL code and metadata."""
         # Extract JSON metadata blocks
         json_blocks = self.json_pattern.findall(content)
+        print(f"[DEBUG] ISFParser.parse_content: Found json_blocks: {json_blocks}")
 
         if not json_blocks:
             # No metadata found, raise ISFParseError
@@ -173,6 +226,7 @@ class ISFParser:
             # Handle passes
             passes = None
             if 'PASSES' in metadata_dict:
+                print(f"[DEBUG] _parse_metadata: metadata_dict['PASSES'] = {metadata_dict['PASSES']}")
                 passes = []
                 for pass_data in metadata_dict['PASSES']:
                     if isinstance(pass_data, dict):
@@ -182,15 +236,21 @@ class ISFParser:
                             'width': pass_data.get('WIDTH'),
                             'height': pass_data.get('HEIGHT'),
                             'persistent': pass_data.get('PERSISTENT'),
-                            'float': pass_data.get('FLOAT'),
+                            'float_buffer': pass_data.get('FLOAT') or pass_data.get('FLOAT_BUFFER'),
                             'filter': pass_data.get('FILTER')
                         }
                         # Remove None values
                         converted_pass = {k: v for k, v in converted_pass.items() if v is not None}
-                        passes.append(ISFPass(**converted_pass))
+                        print(f"[DEBUG] Creating ISFPass from: {converted_pass}")
+                        isf_pass = ISFPass(**converted_pass)
+                        print(f"[DEBUG] Created ISFPass: {isf_pass}")
+                        passes.append(isf_pass)
                     else:
                         # Handle string-only pass definitions
-                        passes.append(ISFPass(target=pass_data))
+                        print(f"[DEBUG] Creating ISFPass from string: {pass_data}")
+                        isf_pass = ISFPass(target=pass_data)
+                        print(f"[DEBUG] Created ISFPass: {isf_pass}")
+                        passes.append(isf_pass)
             
             # Create metadata object
             metadata = ISFMetadata(

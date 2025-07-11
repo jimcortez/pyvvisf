@@ -269,3 +269,58 @@ class TestISFRenderer:
             assert np.allclose(arr[..., 1], 255, atol=2), f"Green channel not as expected: {arr[..., 1]}"
             assert np.all(arr[..., 2] <= 0), f"Blue channel not as expected: {arr[..., 2]}"
             assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}" 
+
+    def test_multi_pass_shader(self):
+        """Test that a simple multi-pass ISF shader can be loaded and rendered (should fail if not implemented)."""
+        import pytest
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Simple multi-pass test shader",
+            "CREDIT": "Test",
+            "ISFVSN": "2.0",
+            "PASSES": [
+                {"TARGET": "bufferA", "WIDTH": 8, "HEIGHT": 8},
+                {"TARGET": "default"}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = vec4(1.0, 0.0, 1.0, 1.0); // Magenta for test
+        }
+        """
+        # Mark as expected to fail until multi-pass is implemented
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            assert image.size == (8, 8)
+            assert image.mode == "RGBA" 
+
+    def test_multi_pass_red_to_blue(self):
+        """Test a multi-pass shader: first pass red, second swaps red/blue, output should be blue."""
+        import pytest
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Multi-pass: red then swap red/blue to blue",
+            "ISFVSN": "2.0",
+            "PASSES": [
+                {"TARGET": "redBuffer"},
+                {}
+            ]
+        }*/
+        void main() {
+            if (PASSINDEX == 0) {
+                gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Red
+            } else if (PASSINDEX == 1) {
+                vec4 c = IMG_THIS_NORM_PIXEL(redBuffer);
+                gl_FragColor = vec4(c.b, c.g, c.r, c.a); // Swap R/B
+            }
+        }
+        """
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            arr = np.array(image)
+            # All pixels should be blue (0, 0, 255, 255)
+            assert np.allclose(arr[..., 0], 0, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.allclose(arr[..., 1], 0, atol=2), f"Green channel not as expected: {arr[..., 1]}"
+            assert np.allclose(arr[..., 2], 255, atol=2), f"Blue channel not as expected: {arr[..., 2]}"
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}" 
