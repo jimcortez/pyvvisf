@@ -11,41 +11,72 @@ pyvvisf is a Python library for working with ISF shaders and rendering.
 Getting Started
 ---------------
 
-Instructions for installation and usage.
+Install pyvvisf with pip:
 
-API Reference
--------------
+.. code-block:: bash
 
-ISFRenderer
+    pip install pyvvisf
+
+For development installation:
+
+.. code-block:: bash
+
+    git clone https://github.com/jimcortez/pyvvisf.git
+    cd pyvvisf
+    pip install -e .
+
+Quick Start
 ~~~~~~~~~~~
 
-The ``ISFRenderer`` class is the main entry point for rendering ISF shaders. It manages the OpenGL context, shader compilation, and rendering workflow.
-
-Basic Usage
-^^^^^^^^^^^
+Here's a minimal example using a well-formed ISF shader:
 
 .. code-block:: python
 
     from pyvvisf import ISFRenderer
 
-    shader_content = """
+    # A simple ISF shader (every pixel is the selected color)
+    test_shader = """
     /*{
-        "DESCRIPTION": "Simple color shader",
-        "INPUTS": [
-            {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]}
+        \"DESCRIPTION\": \"Every pixel is the selected color.\",
+        \"CREDIT\": \"pyvvisf example\",
+        \"ISFVSN\": \"2.0\",
+        \"CATEGORIES\": [\"Generator\"],
+        \"INPUTS\": [
+            {\"NAME\": \"color\", \"TYPE\": \"color\", \"DEFAULT\": [1.0, 0.0, 0.0, 1.0]}
         ]
     }*/
-
     void main() {
         gl_FragColor = color;
     }
     """
 
-    with ISFRenderer(shader_content) as renderer:
-        # Render a 1920x1080 image with the default color
-        result = renderer.render(1920, 1080)
-        image = result.to_pil_image()
-        image.save("output.png")
+    with ISFRenderer(test_shader) as renderer:
+        # Render with the default color (red)
+        buffer = renderer.render(512, 512)
+        image = buffer.to_pil_image()
+        image.save("output_red.png")
+
+        # Render with a custom color (green)
+        renderer.set_input("color", (0.0, 1.0, 0.0, 1.0))
+        buffer = renderer.render(512, 512)
+        image = buffer.to_pil_image()
+        image.save("output_green.png")
+
+Examples
+~~~~~~~~
+
+See the ``examples/`` directory for complete examples:
+
+- ``isf_renderer_demo.py``: Render ISF shaders to images, set inputs, and save output.
+- ``isf_window_demo.py``: Render ISF shaders in a window (interactive display).
+- ``time_offset_demo.py``: Render shaders at different time offsets (for animation or frame capture).
+
+Shader examples are in ``examples/shaders/``:
+
+- ``simple_color_change.fs``: Single color input, fills the screen with the selected color.
+- ``simple_color_animation.fs``: Fades between two user-selected colors over time.
+- ``shapes.fs``: Animated shapes (moving circle, rotating rectangle, pulsating ring).
+- ``simple.fs``: Minimal shader, fills the screen with blue.
 
 Setting Shader Inputs
 ^^^^^^^^^^^^^^^^^^^^^
@@ -102,6 +133,17 @@ All rendering errors raise exceptions derived from ``pyvvisf.errors.ISFError``. 
             renderer.render()
     except errors.ISFError as e:
         print(f"Rendering failed: {e}")
+
+Development
+-----------
+
+To install development dependencies and run tests:
+
+.. code-block:: bash
+
+    pip install -e ".[dev]"
+    pytest
+
 
 API Details
 ===========
