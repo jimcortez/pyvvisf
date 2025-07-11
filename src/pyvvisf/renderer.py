@@ -731,9 +731,15 @@ class ISFRenderer:
         # Use self.metadata if metadata not provided
         if metadata is None:
             metadata = self.metadata
+        
+        merged_inputs = dict(inputs) if inputs else {}
+        if metadata and metadata.inputs:
+            for input_def in metadata.inputs:
+                if input_def.name not in merged_inputs and input_def.default is not None:
+                    merged_inputs[input_def.name] = input_def.default
         # Validate inputs
-        if metadata and inputs:
-            validated_inputs = self.parser.validate_inputs(metadata, inputs)
+        if metadata and merged_inputs:
+            validated_inputs = self.parser.validate_inputs(metadata, merged_inputs)
         else:
             validated_inputs = {}
         # --- Offscreen FBO/texture setup ---

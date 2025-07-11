@@ -394,6 +394,70 @@ class TestISFRendererErrors:
             arr2 = np.array(renderer2.render(8, 8).to_pil_image())
             assert np.allclose(arr1, arr2)
 
+    def test_shader_with_color_input_renders_default_red(self):
+        """Test that a shader with a color input and default renders red if no input is set."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Every pixel is the selected color.",
+            "CREDIT": "pyvvisf example",
+            "ISFVSN": "2.0",
+            "CATEGORIES": ["Generator"],
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color;
+        }
+        """
+        import pyvvisf
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            arr = np.array(image)
+            # All pixels should be close to (255, 0, 0, 255)
+            assert np.allclose(arr[..., 0], 255, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.all(arr[..., 1] <= 2), f"Green channel not as expected: {arr[..., 1]}"
+            assert np.all(arr[..., 2] <= 2), f"Blue channel not as expected: {arr[..., 2]}"
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
+
+    def test_shader_with_color_input_renders_default_red_change_blue(self):
+        """Test that a shader with a color input and default renders red if no input is set."""
+        shader_content = """
+        /*{
+            "DESCRIPTION": "Every pixel is the selected color.",
+            "CREDIT": "pyvvisf example",
+            "ISFVSN": "2.0",
+            "CATEGORIES": ["Generator"],
+            "INPUTS": [
+                {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]}
+            ]
+        }*/
+        void main() {
+            gl_FragColor = color;
+        }
+        """
+        import pyvvisf
+        with pyvvisf.ISFRenderer(shader_content) as renderer:
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            arr = np.array(image)
+            # All pixels should be close to (255, 0, 0, 255)
+            assert np.allclose(arr[..., 0], 255, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.all(arr[..., 1] <= 2), f"Green channel not as expected: {arr[..., 1]}"
+            assert np.all(arr[..., 2] <= 2), f"Blue channel not as expected: {arr[..., 2]}"
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
+
+            renderer.set_input("color", (0.0, 1.0, 0.0, 1.0))
+            buffer = renderer.render(8, 8)
+            image = buffer.to_pil_image()
+            arr = np.array(image)
+            # All pixels should be close to (0, 255, 0, 255)
+            assert np.allclose(arr[..., 0], 0, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.allclose(arr[..., 1], 255, atol=2), f"Green channel not as expected: {arr[..., 1]}"
+            assert np.all(arr[..., 2] <= 0), f"Blue channel not as expected: {arr[..., 2]}"
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
+
     # def test_shader_with_non_constant_loop_condition_fails(self, tmp_path):
     #     """Test that a shader with a non-constant loop condition fails with the expected GLSL error and does not generate an image file."""
         
