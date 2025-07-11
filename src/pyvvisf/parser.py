@@ -75,6 +75,7 @@ class ISFMetadata(BaseModel):
     # ISF-specific fields
     inputs: Any = None
     passes: Any = None
+    imports: Optional[Dict[str, Any]] = None
     # Render settings
     width: Optional[int] = None
     height: Optional[int] = None
@@ -164,7 +165,6 @@ class ISFParser:
         """Parse ISF shader content and return GLSL code and metadata."""
         # Extract JSON metadata blocks
         json_blocks = self.json_pattern.findall(content)
-        print(f"[DEBUG] ISFParser.parse_content: Found json_blocks: {json_blocks}")
 
         if not json_blocks:
             # No metadata found, raise ISFParseError
@@ -226,7 +226,6 @@ class ISFParser:
             # Handle passes
             passes = None
             if 'PASSES' in metadata_dict:
-                print(f"[DEBUG] _parse_metadata: metadata_dict['PASSES'] = {metadata_dict['PASSES']}")
                 passes = []
                 for pass_data in metadata_dict['PASSES']:
                     if isinstance(pass_data, dict):
@@ -241,16 +240,26 @@ class ISFParser:
                         }
                         # Remove None values
                         converted_pass = {k: v for k, v in converted_pass.items() if v is not None}
-                        print(f"[DEBUG] Creating ISFPass from: {converted_pass}")
                         isf_pass = ISFPass(**converted_pass)
-                        print(f"[DEBUG] Created ISFPass: {isf_pass}")
                         passes.append(isf_pass)
                     else:
                         # Handle string-only pass definitions
-                        print(f"[DEBUG] Creating ISFPass from string: {pass_data}")
                         isf_pass = ISFPass(target=pass_data)
-                        print(f"[DEBUG] Created ISFPass: {isf_pass}")
                         passes.append(isf_pass)
+            
+            # Handle imports - convert list to dict if needed
+            imports = metadata_dict.get('IMPORTED')
+            if isinstance(imports, list):
+                # Convert list of import objects to dict
+                imports_dict = {}
+                for import_item in imports:
+                    if isinstance(import_item, dict):
+                        name = import_item.get('NAME')
+                        if name:
+                            imports_dict[name] = import_item
+                    elif isinstance(import_item, str):
+                        imports_dict[import_item] = {'NAME': import_item}
+                imports = imports_dict
             
             # Create metadata object
             metadata = ISFMetadata(
@@ -264,6 +273,7 @@ class ISFParser:
                 tags=metadata_dict.get('TAGS'),
                 inputs=inputs,
                 passes=passes,
+                imports=imports,
                 width=metadata_dict.get('WIDTH'),
                 height=metadata_dict.get('HEIGHT'),
                 aspect_ratio=metadata_dict.get('ASPECT_RATIO'),

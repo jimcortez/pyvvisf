@@ -66,8 +66,6 @@ class TestISFRenderer:
             buffer = renderer.render(8, 8)
             image = buffer.to_pil_image()
             arr = np.array(image)
-            print("[DEBUG] Output pixel array:", arr)
-            print("[DEBUG] Max pixel value:", arr.max())
             assert arr[..., 0].max() > 10, f"Red channel is all zeros: max={arr[..., 0].max()}"
 
     def test_isf_frag_norm_coord_varying(self):
@@ -87,9 +85,6 @@ class TestISFRenderer:
             buffer = renderer.render(8, 8)
             image = buffer.to_pil_image()
             arr = np.array(image)
-            # Print the full pixel array for the top row and left column for debugging
-            print("[DEBUG] Top row RGBA:", arr[0, :, :])
-            print("[DEBUG] Left column RGBA:", arr[:, 0, :])
             # The top-left pixel should be close to zero in RG, bottom-right should be close to 255
             assert arr[0,0,0] <= 20 and arr[0,0,1] <= 20, f"Top-left pixel not close to zero: {arr[0,0,:2]}"
             assert arr[-1,-1,0] >= 235 and arr[-1,-1,1] >= 235, f"Bottom-right pixel not bright: {arr[-1,-1,:2]}"

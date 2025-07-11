@@ -187,5 +187,4 @@ if __name__ == "__main__":
     test_time_offset_default()
     test_time_offset_buffer()
     test_time_offset_negative()
-    test_time_offset_large()
-    print("All time offset tests passed!") 
+    test_time_offset_large() 

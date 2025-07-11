@@ -197,3 +197,33 @@ class TestISFRendererErrors:
         with pyvvisf.ISFRenderer(shader_content) as renderer:
             with pytest.raises(TypeError):
                 renderer.set_inputs("not a dict")  # type: ignore 
+
+    def test_shader_with_syntax_error_fails(self, tmp_path):
+        """Test that a shader with a syntax error fails with the expected GLSL error and does not generate an image file."""
+        
+        # Shader with syntax error that should definitely fail GLSL compilation
+        failing_shader = """/*{
+        "DESCRIPTION": "failing test",
+        "CREDIT": "Test",
+        "CATEGORIES": ["Test"],
+        "INPUTS": []
+    }*/
+    void main() {
+        vec4 col = vec4(0.0);
+        col = col + ;  // Syntax error: missing operand
+        gl_FragColor = col;
+    }"""
+
+        output_path = tmp_path / "test_should_not_exist.png"
+
+        # Shader compilation should fail, raising ShaderCompilationError
+        with pytest.raises(ShaderCompilationError) as exc_info:
+            with pyvvisf.ISFRenderer(failing_shader) as renderer:
+                renderer.save_render(str(output_path), 64, 64)
+        
+        # Check that the error message indicates a shader compilation failure
+        error_msg = str(exc_info.value)
+        assert any(msg in error_msg for msg in ["Shader compilation failed", "Failed to compile shader"]), \
+            f"Expected shader compilation error, got: {error_msg}"
+        # Ensure no file was created
+        assert not output_path.exists(), "No image file should be created for invalid shader" 

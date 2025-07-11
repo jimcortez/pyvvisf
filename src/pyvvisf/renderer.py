@@ -11,7 +11,7 @@ import glfw
 from .parser import ISFParser, ISFMetadata
 from .types import ISFValue
 from .errors import ISFError, ISFParseError, ShaderCompilationError, RenderingError, ContextError
-from .shader_compiler import ShaderCompiler, ShaderSourceProcessor
+from .shader_compiler import ShaderCompiler, ShaderSourceProcessor, ISFShaderProcessor
 from .framebuffer_manager import FramebufferManager, MultiPassFramebufferManager, Framebuffer
 from .input_manager import InputManager
 from OpenGL.GL import glClearColor, glEnable, glGenVertexArrays, glBindVertexArray, glGenBuffers, glBindBuffer, glBufferData, glEnableVertexAttribArray, glVertexAttribPointer, glDeleteVertexArrays, glDeleteBuffers, glDrawArrays, GL_DEPTH_TEST, GL_ARRAY_BUFFER, GL_STATIC_DRAW, GL_FLOAT, GL_FALSE, GL_TRIANGLE_STRIP
@@ -188,18 +188,20 @@ class QuadRenderer:
 class ISFRenderer:
     """Main ISF shader renderer for Python (refactored)."""
     
-    def __init__(self, shader_content: str = '', vertex_shader_content: str = ''):
+    def __init__(self, shader_content: str = '', vertex_shader_content: str = '', glsl_version: str = '330'):
         """Initialize the ISFRenderer with shader content."""
         self.context = GLContextManager()
         self.parser = ISFParser()
         self.input_manager = InputManager(self.parser)
         self.shader_compiler = ShaderCompiler()
+        self.isf_processor = ISFShaderProcessor()
         self.quad_renderer = QuadRenderer()
         self.framebuffer_manager = FramebufferManager()
         
         self.metadata: Optional[ISFMetadata] = None
         self._shader_content = shader_content or ''
         self._vertex_shader_content = vertex_shader_content or ''
+        self._glsl_version = glsl_version
         
         # Validate and load shader
         if not self._shader_content.strip():
@@ -271,26 +273,26 @@ class ISFRenderer:
         return metadata
     
     def _process_vertex_shader(self, source: str, metadata: ISFMetadata) -> str:
-        """Process vertex shader source."""
-        source = ShaderSourceProcessor.ensure_version_directive(source)
-        source = ShaderSourceProcessor.inject_vertex_shader_init(source)
-        source = ShaderSourceProcessor.inject_uniform_declarations(source, metadata)
-        return source
+        """Process vertex shader source using ISF processor."""
+        # Use the new ISF processor for proper ISF shader handling
+        processed_source = self.isf_processor.process_vertex_shader(source, metadata)
+        
+        # Add version directive if needed
+        if "#version" not in processed_source:
+            processed_source = f"#version {self._glsl_version}\n{processed_source}"
+        
+        return processed_source
     
     def _process_fragment_shader(self, source: str, metadata: ISFMetadata) -> str:
-        """Process fragment shader source."""
-        source = ShaderSourceProcessor.ensure_version_directive(source)
-        source = ShaderSourceProcessor.inject_isf_macros(source)
-        source = ShaderSourceProcessor.patch_legacy_gl_fragcolor(source)
-        source = ShaderSourceProcessor.inject_uniform_declarations(source, metadata)
-        source = ShaderSourceProcessor.inject_standard_uniforms(source)
+        """Process fragment shader source using ISF processor."""
+        # Use the new ISF processor for proper ISF shader handling
+        processed_source = self.isf_processor.process_fragment_shader(source, metadata)
         
-        # Handle multi-pass targets
-        if metadata and getattr(metadata, 'passes', None) and len(metadata.passes) > 1:
-            targets = self._extract_pass_targets(metadata.passes)
-            source = ShaderSourceProcessor.inject_pass_target_uniforms(source, targets)
+        # Add version directive if needed
+        if "#version" not in processed_source:
+            processed_source = f"#version {self._glsl_version}\n{processed_source}"
         
-        return source
+        return processed_source
     
     def _extract_pass_targets(self, passes) -> list[str]:
         """Extract target names from passes."""
