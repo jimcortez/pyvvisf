@@ -139,6 +139,48 @@ def test_time_offset_large():
         assert not np.all(arr_large == 0), "Image should not be all zeros"
         assert not np.all(arr_large == 255), "Image should not be all ones"
 
+
+def test_color_matches_expected_at_timecodes():
+    """Test that rendering at specific time codes produces the expected solid color output."""
+    # Shader: red at t<1, green at 1<=t<2, blue at 2<=t<3, white at t>=3
+    color_shader = """
+    /*{
+        "DESCRIPTION": "Solid color changes with time",
+        "CREDIT": "Test",
+        "CATEGORIES": ["Test"],
+        "INPUTS": []
+    }*/
+    void main() {
+        float t = TIME;
+        vec4 color;
+        if (t < 1.0) {
+            color = vec4(1.0, 0.0, 0.0, 1.0); // Red
+        } else if (t < 2.0) {
+            color = vec4(0.0, 1.0, 0.0, 1.0); // Green
+        } else if (t < 3.0) {
+            color = vec4(0.0, 0.0, 1.0, 1.0); // Blue
+        } else {
+            color = vec4(1.0, 1.0, 1.0, 1.0); // White
+        }
+        gl_FragColor = color;
+    }
+    """
+    expected_colors = [
+        (0.0, [255, 0, 0, 255]),    # t=0.0, red
+        (1.0, [0, 255, 0, 255]),    # t=1.0, green
+        (2.0, [0, 0, 255, 255]),    # t=2.0, blue
+        (3.0, [255, 255, 255, 255]) # t=3.0, white
+    ]
+    with pyvvisf.ISFRenderer(color_shader) as renderer:
+        for t, expected in expected_colors:
+            buffer = renderer.render(4, 4, time_offset=t)
+            img = buffer.to_pil_image()
+            arr = np.array(img)
+            # Check that all pixels match expected color (allowing for small rounding error)
+            for i, channel in enumerate(['R', 'G', 'B', 'A']):
+                assert np.allclose(arr[..., i], expected[i], atol=2), \
+                    f"At t={t}, channel {channel} not as expected: got {arr[..., i]}, expected {expected[i]}"
+
 if __name__ == "__main__":
     # Run tests
     test_time_offset_basic()
