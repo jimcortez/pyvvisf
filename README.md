@@ -1,64 +1,75 @@
+# pyvvisf
+
+Pure Python ISF (Interactive Shader Format) renderer built on PyOpenGL.
+
 [![Read the Docs](https://readthedocs.org/projects/pyvvisf/badge/?version=latest)](https://pyvvisf.readthedocs.io/)
 [![GitHub release](https://img.shields.io/github/v/release/jimcortez/pyvvisf?style=flat)](https://github.com/jimcortez/pyvvisf/releases)
 [![PyPI version](https://img.shields.io/pypi/v/pyvvisf.svg)](https://pypi.org/project/pyvvisf/)
 
-# pyvvisf
+![isf_window_demo.py running shapes.fs](assets/shapes_window.png)
 
-Python ISF shader renderer with PyOpenGL. Render images from your shaders, or visualize in a window.
+pyvvisf parses and renders [ISF](https://editor.isf.video/) shaders from Python — to images or to an interactive window — without any C++ build step. It is a modern, pure-Python alternative to [VVISF-GL](https://github.com/mrRay/VVISF-GL), with enhanced error reporting that mirrors the official ISF online editor's diagnostics. Originally written to power [ai-shader-tool](https://github.com/jimcortez/ai-shader-tool), it gives AI agents (and humans) a way to validate, render, and inspect generated shaders. The majority of code in this repository was built with AI.
 
-## Overview
-
-pyvvisf is a pure Python implementation for parsing and rendering ISF (Interactive Shader Format) shaders. It provides a modern, maintainable alternative to the [C++ VVISF-GL](https://github.com/mrRay/VVISF-GL) library with enhanced error reporting and cross-platform compatibility. The original version of this library tried to build VVISF-GL bindings, but that approach was abandoned.
-
-This library tried to catch all the errors that would trigger the online ISF renderer here: https://editor.isf.video/. It will also try to provide compatibility warnings when appropriate.
-
-The main use of this library is intended to be from https://github.com/jimcortez/ai-shader-tool, which provides ai's the ablility to validate, render, and inspect the results of shaders it generates.
-
-The majority of code in this repository was built with AI.
+[Docs](https://pyvvisf.readthedocs.io/) | [PyPI](https://pypi.org/project/pyvvisf/) | [Issue Tracker](https://github.com/jimcortez/pyvvisf/issues)
 
 ## Features
 
-- **Pure Python**: No C++ compilation required
-- **Robust JSON parsing**: Uses json5 for comment support and trailing commas
-- **Modern OpenGL**: PyOpenGL with GLFW for cross-platform context management
-- **Enhanced error reporting**: Detailed Python-native error messages with context
-- **Type safety**: Pydantic models for metadata validation
-- **Auto-coercion**: Automatic type conversion for shader inputs
-- **Context management**: Automatic resource cleanup
-- **GLSL version support**: Automatic detection and support for multiple GLSL versions
-- **ISF 2.0 compliance**: Full support for ISF 2.0 specification including multi-pass rendering and imports
-- **ISF special functions**: Support for IMG_THIS_PIXEL, IMG_PIXEL, IMG_SIZE, and other ISF functions
+* **Pure Python** — no C++ compilation required
+* **Robust ISF parsing** with json5 (comments, trailing commas)
+* **Modern OpenGL** via PyOpenGL + GLFW for cross-platform contexts
+* **Enhanced error reporting** with Python-native messages and shader context
+* **Type-safe metadata** via Pydantic models, with auto-coercion for inputs
+* **Multi-version GLSL support** with automatic detection
+* **ISF 2.0 compliant** — multi-pass rendering, imports, `IMG_THIS_PIXEL`, `IMG_PIXEL`, `IMG_SIZE`, etc.
+* **Context-managed resources** for clean setup and teardown
 
-## Installation
+## Contents
+
+* [Quick Start](#quick-start)
+* [FAQ](#frequently-asked-questions-faq)
+* [Contributing Guide](#contributing)
+* [License](#license)
+* [Support](#support)
+
+## Quick Start
+
+See the [docs](https://pyvvisf.readthedocs.io/) for a comprehensive overview.
+
+### Requirements
+
+* Python 3.8+
+* A working OpenGL driver (the renderer uses GLFW + PyOpenGL)
+
+### Setup Instructions
+
+Install from PyPI:
 
 ```bash
 pip install pyvvisf
 ```
 
-### Development Installation
+Or install from source for development:
 
 ```bash
 git clone https://github.com/jimcortez/pyvvisf.git
 cd pyvvisf
-pip install -e .
+pip install -e ".[dev]"
 ```
 
-## Quick Start
+### Run Instructions
 
-Here's a minimal example using a well-formed ISF shader:
+Render an ISF shader to a PNG:
 
 ```python
 from pyvvisf import ISFRenderer
 
-# A simple ISF shader (every pixel is the selected color)
-test_shader = """
+shader = """
 /*{
-    \"DESCRIPTION\": \"Every pixel is the selected color.\",
-    \"CREDIT\": \"pyvvisf example\",
-    \"ISFVSN\": \"2.0\",
-    \"CATEGORIES\": [\"Generator\"],
-    \"INPUTS\": [
-        {\"NAME\": \"color\", \"TYPE\": \"color\", \"DEFAULT\": [1.0, 0.0, 0.0, 1.0]}
+    "DESCRIPTION": "Every pixel is the selected color.",
+    "ISFVSN": "2.0",
+    "CATEGORIES": ["Generator"],
+    "INPUTS": [
+        {"NAME": "color", "TYPE": "color", "DEFAULT": [1.0, 0.0, 0.0, 1.0]}
     ]
 }*/
 void main() {
@@ -66,87 +77,55 @@ void main() {
 }
 """
 
-with ISFRenderer(test_shader) as renderer:
-    # Render with the default color (red)
-    buffer = renderer.render(512, 512)
-    image = buffer.to_pil_image()
-    image.save("output_red.png")
+with ISFRenderer(shader) as renderer:
+    renderer.render(512, 512).to_pil_image().save("output_red.png")
 
-    # Render with a custom color (green)
     renderer.set_input("color", (0.0, 1.0, 0.0, 1.0))
-    buffer = renderer.render(512, 512)
-    image = buffer.to_pil_image()
-    image.save("output_green.png")
+    renderer.render(512, 512).to_pil_image().save("output_green.png")
 ```
 
-## GLSL Version Support
+### Usage Examples
 
-pyvvisf supports multiple GLSL versions and can automatically detect which versions are supported on your system:
+* `examples/isf_renderer_demo.py` — render shaders to images, set inputs, save output
+* `examples/isf_window_demo.py` — interactive window display (screenshot above)
+* `examples/time_offset_demo.py` — capture frames at arbitrary time offsets
+
+Bundled shaders in `examples/shaders/`:
+
+* `simple.fs` — fills the screen with blue
+* `simple_color_change.fs` — single color input
+* `simple_color_animation.fs` — fades between two colors over time
+* `shapes.fs` — animated moving circle, rotating rectangle, pulsating ring
+
+To pin a specific GLSL version or query what's available:
 
 ```python
-from pyvvisf import get_supported_glsl_versions, ISFRenderer
+from pyvvisf import ISFRenderer, get_supported_glsl_versions
 
-# Check which GLSL versions are supported
-supported_versions = get_supported_glsl_versions()
-print(f"Supported GLSL versions: {supported_versions}")
-
-# Create renderer with specific GLSL version
-renderer = ISFRenderer(shader_content, glsl_version='330')
+print(get_supported_glsl_versions())
+renderer = ISFRenderer(shader_content, glsl_version="330")
 ```
 
-The default GLSL version is '330', but you can specify any supported version. The library will automatically test shader compilation to ensure compatibility.
+The default is `'330'`. The library compiles a probe shader at construction time to verify compatibility.
 
-## Examples
-
-See the `examples/` directory for complete examples:
-
-- `isf_renderer_demo.py`: Render ISF shaders to images, set inputs, and save output.
-- `isf_window_demo.py`: Render ISF shaders in a window (interactive display).
-- `time_offset_demo.py`: Render shaders at different time offsets (for animation or frame capture).
-
-Shader examples are in `examples/shaders/`:
-
-- `simple_color_change.fs`: Single color input, fills the screen with the selected color.
-- `simple_color_animation.fs`: Fades between two user-selected colors over time.
-- `shapes.fs`: Animated shapes (moving circle, rotating rectangle, pulsating ring).
-- `simple.fs`: Minimal shader, fills the screen with blue.
-
-## Development
-
-### Building
+### Test Instructions
 
 ```bash
-# Install development dependencies
 pip install -e ".[dev]"
-
-# Run tests
 pytest
-```
-
-### Project Structure
-
-```
-pyvvisf/
-├── src/pyvvisf/
-│   ├── renderer.py      # Main renderer
-│   ├── parser.py        # ISF parser with json5
-│   ├── types.py         # Value types
-│   ├── errors.py        # Error handling
-│   ├── shader_compiler.py # Shader compilation and processing
-│   ├── framebuffer_manager.py # Framebuffer management
-│   └── input_manager.py # Input validation and management
-├── examples/
-├── tests/
-└── docs/
 ```
 
 ## License
 
-MIT License - see LICENSE file for details.
+See [LICENSE](LICENSE) — MIT.
 
-## Special Thanks
+## Support
 
-- https://github.com/mrRay/VVISF-GL for initial reference implementation
-- https://github.com/msfeldstein/interactive-shader-format-js for another reference implementation
-- https://github.com/mcfletch/pyopengl for all the bindings
-- https://github.com/FlorianRhiem/pyGLFW for the bindings
+Maintainer: [@jimcortez](https://github.com/jimcortez). For bugs and feature requests, please use the [issue tracker](https://github.com/jimcortez/pyvvisf/issues).
+
+## Acknowledgments
+
+* [VVISF-GL](https://github.com/mrRay/VVISF-GL) — initial reference implementation
+* [interactive-shader-format-js](https://github.com/msfeldstein/interactive-shader-format-js) — second reference implementation
+* [PyOpenGL](https://github.com/mcfletch/pyopengl) — OpenGL bindings
+* [pyGLFW](https://github.com/FlorianRhiem/pyGLFW) — GLFW bindings
