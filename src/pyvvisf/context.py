@@ -1,6 +1,7 @@
 """GLFW window/OpenGL context lifecycle management."""
 
 import logging
+import sys
 
 import glfw
 from OpenGL import GL
@@ -8,6 +9,28 @@ from OpenGL import GL
 from .errors import ContextError
 
 logger = logging.getLogger(__name__)
+
+# GLFW init/terminate are process-global. Multiple ISFRenderer instances must
+# share a single init() and only the last one to clean up should terminate().
+_glfw_init_refcount = 0
+
+
+def _glfw_acquire():
+    """Initialize GLFW (if needed) and bump the refcount."""
+    global _glfw_init_refcount
+    if _glfw_init_refcount == 0 and not glfw.init():
+        raise ContextError("Failed to initialize GLFW")
+    _glfw_init_refcount += 1
+
+
+def _glfw_release():
+    """Decrement the refcount and call glfw.terminate() when it hits zero."""
+    global _glfw_init_refcount
+    if _glfw_init_refcount <= 0:
+        return
+    _glfw_init_refcount -= 1
+    if _glfw_init_refcount == 0:
+        glfw.terminate()
 
 
 class GLContextManager:
@@ -28,27 +51,33 @@ class GLContextManager:
         if self.initialized:
             return
 
-        if not glfw.init():
-            raise ContextError("Failed to initialize GLFW")
+        _glfw_acquire()
 
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        glfw.window_hint(glfw.VISIBLE, glfw.TRUE if visible else glfw.FALSE)
+        try:
+            glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+            glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+            glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+            # macOS requires OPENGL_FORWARD_COMPAT for any core profile context.
+            # Setting it everywhere is harmless and makes behavior consistent.
+            if sys.platform == "darwin":
+                glfw.window_hint(glfw.OPENGL_FORWARD_COMPAT, glfw.TRUE)
+            glfw.window_hint(glfw.VISIBLE, glfw.TRUE if visible else glfw.FALSE)
 
-        self.window = glfw.create_window(width, height, "ISF Renderer", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise ContextError("Failed to create GLFW window")
+            self.window = glfw.create_window(width, height, "ISF Renderer", None, None)
+            if not self.window:
+                raise ContextError("Failed to create GLFW window")
 
-        glfw.make_context_current(self.window)
+            glfw.make_context_current(self.window)
 
-        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
-        GL.glEnable(GL.GL_DEPTH_TEST)
+            GL.glClearColor(0.0, 0.0, 0.0, 1.0)
+            GL.glEnable(GL.GL_DEPTH_TEST)
 
-        self.initialized = True
-        self.visible = visible
-        logger.info("GLFW context initialized successfully")
+            self.initialized = True
+            self.visible = visible
+            logger.info("GLFW context initialized successfully")
+        except Exception:
+            _glfw_release()
+            raise
 
     def show_window(self):
         """Make the window visible (used when entering interactive window mode)."""
@@ -68,7 +97,7 @@ class GLContextManager:
             self.window = None
 
         if self.initialized:
-            glfw.terminate()
+            _glfw_release()
             self.initialized = False
             self.visible = False
 

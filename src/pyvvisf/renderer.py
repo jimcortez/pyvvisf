@@ -341,6 +341,12 @@ class ISFRenderer:
 
     def cleanup(self):
         """Clean up all resources."""
+        # Bind this instance's context before issuing GL deletes — otherwise,
+        # if a sibling ISFRenderer cleaned up first and unbound its window,
+        # our GL calls would target a null context (silent on Linux, hard
+        # GLError on Windows).
+        if self.context.initialized:
+            self.context.make_current()
         self.shader_compiler.cleanup()
         self.quad_renderer.cleanup()
         self.framebuffer_manager.cleanup_all()
