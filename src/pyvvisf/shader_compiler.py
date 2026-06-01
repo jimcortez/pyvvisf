@@ -1,13 +1,13 @@
 """Shader compilation and source manipulation utilities."""
 
-import re
-from typing import List, Optional, Any, Dict
 import logging
+import re
+from typing import Any, Dict, List, Optional
 
-from .parser import ISFMetadata, ISFInput, ISFPass
+from OpenGL import GL
+
 from .errors import ShaderCompilationError
-
-from OpenGL.GL import glCreateShader, glShaderSource, glCompileShader, glGetShaderiv, glGetShaderInfoLog, glDeleteShader, glCreateProgram, glAttachShader, glLinkProgram, glGetProgramiv, glGetProgramInfoLog, glUseProgram, glGetUniformLocation, glGetActiveUniform, glUniform1i, glUniform1f, glUniform2f, glUniform3f, glUniform4f, glDeleteProgram, GL_VERTEX_SHADER, GL_FRAGMENT_SHADER, GL_GEOMETRY_SHADER, GL_TESS_CONTROL_SHADER, GL_TESS_EVALUATION_SHADER, GL_COMPILE_STATUS, GL_LINK_STATUS, GL_ACTIVE_UNIFORMS, glGetString, GL_VERSION, GL_SHADING_LANGUAGE_VERSION
+from .parser import ISFMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -99,8 +99,8 @@ def get_supported_glsl_versions() -> List[str]:
     ]
     supported_versions = []
     try:
-        gl_version_str = glGetString(GL_VERSION)
-        glsl_version_str = glGetString(GL_SHADING_LANGUAGE_VERSION)
+        gl_version_str = GL.glGetString(GL.GL_VERSION)
+        glsl_version_str = GL.glGetString(GL.GL_SHADING_LANGUAGE_VERSION)
         if gl_version_str is None or glsl_version_str is None:
             logger.warning("Could not get OpenGL version information")
             return ['330', '400', '410', '420', '430', '440', '450']
@@ -634,184 +634,151 @@ _{name}_normTexCoord =
 
 class ShaderCompiler:
     """Handles OpenGL shader compilation and program creation."""
-    
+
     def __init__(self):
         self.program: Optional[int] = None
         self.vertex_shader: Optional[int] = None
         self.fragment_shader: Optional[int] = None
         self.uniform_locations: dict[str, int] = {}
-        
+
     def compile_shader(self, source: str, shader_type: int) -> int:
         """Compile a GLSL shader and check for errors."""
-        try:
-            shader = glCreateShader(shader_type)
-        except NameError:
-            # OpenGL not available - for testing purposes
-            return 1
-            
+        shader = GL.glCreateShader(shader_type)
+
         if shader is None or shader == 0:
             raise ShaderCompilationError(
                 f"Failed to create shader object (type {self._shader_type_name(shader_type)}).",
                 shader_source=source,
                 shader_type=self._shader_type_name(shader_type)
             )
-            
-        try:
-            glShaderSource(shader, source)
-            glCompileShader(shader)
-            
-            if not glGetShaderiv(shader, GL_COMPILE_STATUS):
-                error_log = glGetShaderInfoLog(shader).decode('utf-8')
-                glDeleteShader(shader)
-                raise ShaderCompilationError(
-                    f"Shader compilation failed:\n{error_log}",
-                    shader_source=source,
-                    shader_type=self._shader_type_name(shader_type)
-                )
-        except NameError:
-            # OpenGL not available - for testing purposes
-            pass
-            
+
+        GL.glShaderSource(shader, source)
+        GL.glCompileShader(shader)
+
+        if not GL.glGetShaderiv(shader, GL.GL_COMPILE_STATUS):
+            error_log = GL.glGetShaderInfoLog(shader).decode('utf-8')
+            GL.glDeleteShader(shader)
+            raise ShaderCompilationError(
+                f"Shader compilation failed:\n{error_log}",
+                shader_source=source,
+                shader_type=self._shader_type_name(shader_type)
+            )
+
         return int(shader)
-    
+
     def create_program(self, vertex_source: str, fragment_source: str, expected_uniforms: Optional[List[str]] = None) -> int:
         """Create and link a shader program."""
         try:
-            self.vertex_shader = self.compile_shader(vertex_source, GL_VERTEX_SHADER)
-            self.fragment_shader = self.compile_shader(fragment_source, GL_FRAGMENT_SHADER)
-            
-            try:
-                self.program = glCreateProgram()
-            except NameError:
-                # OpenGL not available - for testing purposes
-                self.program = 1
-                return 1
-                
+            self.vertex_shader = self.compile_shader(vertex_source, GL.GL_VERTEX_SHADER)
+            self.fragment_shader = self.compile_shader(fragment_source, GL.GL_FRAGMENT_SHADER)
+
+            self.program = GL.glCreateProgram()
+
             if self.program is None or self.program == 0:
                 raise ShaderCompilationError("Failed to create shader program object.")
-                
-            glAttachShader(self.program, self.vertex_shader)
-            glAttachShader(self.program, self.fragment_shader)
-            glLinkProgram(self.program)
-            
-            if not glGetProgramiv(self.program, GL_LINK_STATUS):
-                error_log = glGetProgramInfoLog(self.program).decode('utf-8')
+
+            GL.glAttachShader(self.program, self.vertex_shader)
+            GL.glAttachShader(self.program, self.fragment_shader)
+            GL.glLinkProgram(self.program)
+
+            if not GL.glGetProgramiv(self.program, GL.GL_LINK_STATUS):
+                error_log = GL.glGetProgramInfoLog(self.program).decode('utf-8')
                 raise ShaderCompilationError(f"Shader program linking failed:\n{error_log}")
-                
-            glUseProgram(self.program)
+
+            GL.glUseProgram(self.program)
             self._cache_uniform_locations(expected_uniforms or [])
-            
+
             return int(self.program)
-            
-        except Exception as e:
+
+        except Exception:
             self.cleanup()
-            raise e
-    
+            raise
+
     def _cache_uniform_locations(self, expected_uniforms: List[str]):
         """Cache uniform locations for performance."""
         self.uniform_locations = {}
-        
-        try:
-            # Cache active uniforms
-            num_uniforms = glGetProgramiv(self.program, GL_ACTIVE_UNIFORMS)
-            for i in range(num_uniforms):
-                name, size, uniform_type = glGetActiveUniform(self.program, i)
-                if hasattr(name, 'decode'):
-                    name = name.decode('utf-8')
-                elif hasattr(name, 'tobytes'):
-                    name = name.tobytes().decode('utf-8').rstrip('\x00')
-                else:
-                    name = str(name)
-                location = glGetUniformLocation(self.program, name)
-                self.uniform_locations[name] = location
-        except NameError:
-            # OpenGL not available - for testing purposes
-            pass
-            
+
+        # Cache active uniforms
+        num_uniforms = GL.glGetProgramiv(self.program, GL.GL_ACTIVE_UNIFORMS)
+        for i in range(num_uniforms):
+            name, size, uniform_type = GL.glGetActiveUniform(self.program, i)
+            if hasattr(name, 'decode'):
+                name = name.decode('utf-8')
+            elif hasattr(name, 'tobytes'):
+                name = name.tobytes().decode('utf-8').rstrip('\x00')
+            else:
+                name = str(name)
+            location = GL.glGetUniformLocation(self.program, name)
+            self.uniform_locations[name] = location
+
         # Cache expected uniforms
         standard_uniforms = ['PASSINDEX', 'RENDERSIZE', 'TIME', 'TIMEDELTA', 'DATE', 'FRAMEINDEX']
         all_expected = standard_uniforms + expected_uniforms
-        
+
         for name in all_expected:
             if name not in self.uniform_locations:
-                try:
-                    location = glGetUniformLocation(self.program, name)
-                    self.uniform_locations[name] = location
-                except NameError:
-                    # OpenGL not available - for testing purposes
-                    self.uniform_locations[name] = -1
-    
+                location = GL.glGetUniformLocation(self.program, name)
+                self.uniform_locations[name] = location
+
     def set_uniform(self, name: str, value: Any):
         """Set the value of a uniform variable."""
         location = self.uniform_locations.get(name, -1)
         if location == -1:
             return
 
-        from .types import ISFColor, ISFPoint2D, ISFFloat, ISFInt, ISFBool
+        from .types import ISFBool, ISFColor, ISFFloat, ISFInt, ISFPoint2D
 
-        try:
-            # Unwrap ISF value types to their underlying Python values
-            if isinstance(value, ISFFloat):
-                value = value.value
-            elif isinstance(value, ISFInt):
-                value = value.value
-            elif isinstance(value, ISFBool):
-                value = value.value
-            if isinstance(value, bool):
-                glUniform1i(location, 1 if value else 0)
-            elif isinstance(value, int):
-                glUniform1i(location, value)
-            elif isinstance(value, float):
-                glUniform1f(location, value)
-            elif isinstance(value, (list, tuple)):
-                if len(value) == 2:
-                    glUniform2f(location, value[0], value[1])
-                elif len(value) == 3:
-                    glUniform3f(location, value[0], value[1], value[2])
-                elif len(value) == 4:
-                    glUniform4f(location, value[0], value[1], value[2], value[3])
-            elif isinstance(value, ISFColor):
-                glUniform4f(location, value.r, value.g, value.b, value.a)
-            elif isinstance(value, ISFPoint2D):
-                glUniform2f(location, value.x, value.y)
-            else:
-                logger.warning(f"Unknown uniform type: {type(value)}")
-        except NameError:
-            # OpenGL not available - for testing purposes
-            pass
-    
+        # Unwrap ISF value types to their underlying Python values
+        if isinstance(value, ISFFloat):
+            value = value.value
+        elif isinstance(value, ISFInt):
+            value = value.value
+        elif isinstance(value, ISFBool):
+            value = value.value
+        if isinstance(value, bool):
+            GL.glUniform1i(location, 1 if value else 0)
+        elif isinstance(value, int):
+            GL.glUniform1i(location, value)
+        elif isinstance(value, float):
+            GL.glUniform1f(location, value)
+        elif isinstance(value, (list, tuple)):
+            if len(value) == 2:
+                GL.glUniform2f(location, value[0], value[1])
+            elif len(value) == 3:
+                GL.glUniform3f(location, value[0], value[1], value[2])
+            elif len(value) == 4:
+                GL.glUniform4f(location, value[0], value[1], value[2], value[3])
+        elif isinstance(value, ISFColor):
+            GL.glUniform4f(location, value.r, value.g, value.b, value.a)
+        elif isinstance(value, ISFPoint2D):
+            GL.glUniform2f(location, value.x, value.y)
+        else:
+            logger.warning(f"Unknown uniform type: {type(value)}")
+
     def use(self):
         """Activate this shader program."""
         if self.program:
-            try:
-                glUseProgram(self.program)
-            except NameError:
-                # OpenGL not available - for testing purposes
-                pass
-    
+            GL.glUseProgram(self.program)
+
     def cleanup(self):
         """Delete all OpenGL resources."""
-        try:
-            if self.program:
-                glDeleteProgram(self.program)
-                self.program = None
-            if self.vertex_shader:
-                glDeleteShader(self.vertex_shader)
-                self.vertex_shader = None
-            if self.fragment_shader:
-                glDeleteShader(self.fragment_shader)
-                self.fragment_shader = None
-        except NameError:
-            # OpenGL not available - for testing purposes
-            pass
+        if self.program:
+            GL.glDeleteProgram(self.program)
+            self.program = None
+        if self.vertex_shader:
+            GL.glDeleteShader(self.vertex_shader)
+            self.vertex_shader = None
+        if self.fragment_shader:
+            GL.glDeleteShader(self.fragment_shader)
+            self.fragment_shader = None
         self.uniform_locations.clear()
-    
+
     def _shader_type_name(self, shader_type: int) -> str:
         """Get shader type name for error messages."""
         return {
-            GL_VERTEX_SHADER: "vertex",
-            GL_FRAGMENT_SHADER: "fragment",
-            GL_GEOMETRY_SHADER: "geometry",
-            GL_TESS_CONTROL_SHADER: "tessellation control",
-            GL_TESS_EVALUATION_SHADER: "tessellation evaluation",
+            GL.GL_VERTEX_SHADER: "vertex",
+            GL.GL_FRAGMENT_SHADER: "fragment",
+            GL.GL_GEOMETRY_SHADER: "geometry",
+            GL.GL_TESS_CONTROL_SHADER: "tessellation control",
+            GL.GL_TESS_EVALUATION_SHADER: "tessellation evaluation",
         }.get(shader_type, f"unknown ({shader_type})")
