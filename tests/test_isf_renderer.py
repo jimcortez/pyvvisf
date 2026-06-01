@@ -7,10 +7,10 @@ from pathlib import Path
 # Add the src directory to the path for the test
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-import pytest
-import pyvvisf
-from PIL import Image
 import numpy as np
+
+import pyvvisf
+
 
 class TestISFRenderer:
     def test_valid_shader_compiles_successfully(self):
@@ -33,7 +33,7 @@ class TestISFRenderer:
             gl_FragColor = color;
         }
         """
-        
+
         # This should not raise any exceptions
         with pyvvisf.ISFRenderer(shader_content) as renderer:
             # Test that we can render
@@ -86,9 +86,13 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # The top-left pixel should be close to zero in RG, bottom-right should be close to 255
-            assert arr[0,0,0] <= 20 and arr[0,0,1] <= 20, f"Top-left pixel not close to zero: {arr[0,0,:2]}"
-            assert arr[-1,-1,0] >= 235 and arr[-1,-1,1] >= 235, f"Bottom-right pixel not bright: {arr[-1,-1,:2]}"
-            assert arr[0,0,3] == 255 and arr[-1,-1,3] == 255, "Alpha should be 255 everywhere"
+            assert arr[0, 0, 0] <= 20 and arr[0, 0, 1] <= 20, (
+                f"Top-left pixel not close to zero: {arr[0, 0, :2]}"
+            )
+            assert arr[-1, -1, 0] >= 235 and arr[-1, -1, 1] >= 235, (
+                f"Bottom-right pixel not bright: {arr[-1, -1, :2]}"
+            )
+            assert arr[0, 0, 3] == 255 and arr[-1, -1, 3] == 255, "Alpha should be 255 everywhere"
 
     def test_constant_color_pipeline(self):
         """Test that a constant color is rendered, verifying the pipeline works."""
@@ -107,9 +111,15 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # All pixels should be close to (26, 51, 76, 255)
-            assert np.allclose(arr[..., 0], 26, atol=2), f"Red channel not as expected: {arr[..., 0]}"
-            assert np.allclose(arr[..., 1], 51, atol=2), f"Green channel not as expected: {arr[..., 1]}"
-            assert np.allclose(arr[..., 2], 76, atol=2), f"Blue channel not as expected: {arr[..., 2]}"
+            assert np.allclose(arr[..., 0], 26, atol=2), (
+                f"Red channel not as expected: {arr[..., 0]}"
+            )
+            assert np.allclose(arr[..., 1], 51, atol=2), (
+                f"Green channel not as expected: {arr[..., 1]}"
+            )
+            assert np.allclose(arr[..., 2], 76, atol=2), (
+                f"Blue channel not as expected: {arr[..., 2]}"
+            )
             assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
 
     def test_primitive_types_are_accepted_for_inputs(self):
@@ -170,10 +180,7 @@ class TestISFRenderer:
         }
         """
         with pyvvisf.ISFRenderer(shader_content) as renderer:
-            renderer.set_inputs({
-                "color": [0.0, 1.0, 0.0, 1.0],
-                "intensity": 0.5
-            })
+            renderer.set_inputs({"color": [0.0, 1.0, 0.0, 1.0], "intensity": 0.5})
             buffer = renderer.render(8, 8)
             image = buffer.to_pil_image()
             arr = np.array(image)
@@ -193,7 +200,10 @@ class TestISFRenderer:
             gl_FragColor = color * vec4(intensity, intensity, intensity, 1.0);
         }
         """
-        with pyvvisf.ISFRenderer(shader_content) as renderer1, pyvvisf.ISFRenderer(shader_content) as renderer2:
+        with (
+            pyvvisf.ISFRenderer(shader_content) as renderer1,
+            pyvvisf.ISFRenderer(shader_content) as renderer2,
+        ):
             # Use set_inputs
             renderer1.set_inputs({"color": [0.0, 0.0, 1.0, 1.0], "intensity": 0.7})
             arr1 = np.array(renderer1.render(8, 8).to_pil_image())
@@ -224,7 +234,9 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # All pixels should be close to (255, 0, 0, 255)
-            assert np.allclose(arr[..., 0], 255, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.allclose(arr[..., 0], 255, atol=2), (
+                f"Red channel not as expected: {arr[..., 0]}"
+            )
             assert np.all(arr[..., 1] <= 2), f"Green channel not as expected: {arr[..., 1]}"
             assert np.all(arr[..., 2] <= 2), f"Blue channel not as expected: {arr[..., 2]}"
             assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
@@ -250,7 +262,9 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # All pixels should be close to (255, 0, 0, 255)
-            assert np.allclose(arr[..., 0], 255, atol=2), f"Red channel not as expected: {arr[..., 0]}"
+            assert np.allclose(arr[..., 0], 255, atol=2), (
+                f"Red channel not as expected: {arr[..., 0]}"
+            )
             assert np.all(arr[..., 1] <= 2), f"Green channel not as expected: {arr[..., 1]}"
             assert np.all(arr[..., 2] <= 2), f"Blue channel not as expected: {arr[..., 2]}"
             assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
@@ -260,14 +274,17 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # All pixels should be close to (0, 255, 0, 255)
-            assert np.allclose(arr[..., 0], 0, atol=2), f"Red channel not as expected: {arr[..., 0]}"
-            assert np.allclose(arr[..., 1], 255, atol=2), f"Green channel not as expected: {arr[..., 1]}"
+            assert np.allclose(arr[..., 0], 0, atol=2), (
+                f"Red channel not as expected: {arr[..., 0]}"
+            )
+            assert np.allclose(arr[..., 1], 255, atol=2), (
+                f"Green channel not as expected: {arr[..., 1]}"
+            )
             assert np.all(arr[..., 2] <= 0), f"Blue channel not as expected: {arr[..., 2]}"
-            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}" 
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
 
     def test_multi_pass_shader(self):
         """Test that a simple multi-pass ISF shader can be loaded and rendered (should fail if not implemented)."""
-        import pytest
         shader_content = """
         /*{
             "DESCRIPTION": "Simple multi-pass test shader",
@@ -287,11 +304,10 @@ class TestISFRenderer:
             buffer = renderer.render(8, 8)
             image = buffer.to_pil_image()
             assert image.size == (8, 8)
-            assert image.mode == "RGBA" 
+            assert image.mode == "RGBA"
 
     def test_multi_pass_red_to_blue(self):
         """Test a multi-pass shader: first pass red, second swaps red/blue, output should be blue."""
-        import pytest
         shader_content = """
         /*{
             "DESCRIPTION": "Multi-pass: red then swap red/blue to blue",
@@ -315,10 +331,16 @@ class TestISFRenderer:
             image = buffer.to_pil_image()
             arr = np.array(image)
             # All pixels should be blue (0, 0, 255, 255)
-            assert np.allclose(arr[..., 0], 0, atol=2), f"Red channel not as expected: {arr[..., 0]}"
-            assert np.allclose(arr[..., 1], 0, atol=2), f"Green channel not as expected: {arr[..., 1]}"
-            assert np.allclose(arr[..., 2], 255, atol=2), f"Blue channel not as expected: {arr[..., 2]}"
-            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}" 
+            assert np.allclose(arr[..., 0], 0, atol=2), (
+                f"Red channel not as expected: {arr[..., 0]}"
+            )
+            assert np.allclose(arr[..., 1], 0, atol=2), (
+                f"Green channel not as expected: {arr[..., 1]}"
+            )
+            assert np.allclose(arr[..., 2], 255, atol=2), (
+                f"Blue channel not as expected: {arr[..., 2]}"
+            )
+            assert np.all(arr[..., 3] == 255), f"Alpha channel not as expected: {arr[..., 3]}"
 
     def test_aurora_borealis_shader_renders(self):
         """Regression test: Aurora Borealis ISF shader should compile and render without error."""
@@ -390,4 +412,4 @@ class TestISFRenderer:
             buffer = renderer.render(32, 32)
             image = buffer.to_pil_image()
             assert image.size == (32, 32)
-            assert image.mode == "RGBA" 
+            assert image.mode == "RGBA"

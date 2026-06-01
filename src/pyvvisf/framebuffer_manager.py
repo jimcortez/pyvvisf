@@ -1,7 +1,7 @@
 """OpenGL framebuffer management utilities."""
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 from OpenGL import GL
 
@@ -37,7 +37,7 @@ class FramebufferManager:
     """Manages creation and cleanup of OpenGL framebuffers."""
 
     def __init__(self):
-        self.framebuffers: List[Framebuffer] = []
+        self.framebuffers: list[Framebuffer] = []
 
     def create_framebuffer(self, width: int, height: int) -> Framebuffer:
         """Create a new framebuffer with attached texture."""
@@ -47,14 +47,25 @@ class FramebufferManager:
         tex = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
         GL.glTexImage2D(
-            GL.GL_TEXTURE_2D, 0, GL.GL_RGBA, width, height, 0,
-            GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None,
+            GL.GL_TEXTURE_2D,
+            0,
+            GL.GL_RGBA,
+            width,
+            height,
+            0,
+            GL.GL_RGBA,
+            GL.GL_UNSIGNED_BYTE,
+            None,
         )
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
 
         GL.glFramebufferTexture2D(
-            GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, tex, 0,
+            GL.GL_FRAMEBUFFER,
+            GL.GL_COLOR_ATTACHMENT0,
+            GL.GL_TEXTURE_2D,
+            tex,
+            0,
         )
 
         status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
@@ -105,14 +116,16 @@ class MultiPassFramebufferManager(FramebufferManager):
         super().__init__()
         self.pass_targets: dict[str, Framebuffer] = {}
 
-    def create_pass_framebuffers(self, passes: List[Any], width: int, height: int) -> List[Optional[Framebuffer]]:
+    def create_pass_framebuffers(
+        self, passes: list[Any], width: int, height: int
+    ) -> list[Framebuffer | None]:
         """Create framebuffers for each pass that has a target."""
-        pass_framebuffers: List[Optional[Framebuffer]] = []
+        pass_framebuffers: list[Framebuffer | None] = []
 
         for pass_def in passes:
             target_name = self._get_pass_target(pass_def)
 
-            if target_name and target_name != 'default':
+            if target_name and target_name != "default":
                 framebuffer = self.create_framebuffer(width, height)
                 self.pass_targets[target_name] = framebuffer
                 pass_framebuffers.append(framebuffer)
@@ -121,12 +134,12 @@ class MultiPassFramebufferManager(FramebufferManager):
 
         return pass_framebuffers
 
-    def get_target_texture_id(self, target_name: str) -> Optional[int]:
+    def get_target_texture_id(self, target_name: str) -> int | None:
         """Get the texture ID for a named target."""
         framebuffer = self.pass_targets.get(target_name)
         return framebuffer.texture_id if framebuffer else None
 
-    def bind_target_textures(self, targets: List[str], texture_unit_start: int = 1):
+    def bind_target_textures(self, targets: list[str], texture_unit_start: int = 1):
         """Bind target textures to texture units for shader access."""
         tex_unit = texture_unit_start
         for target_name in targets:
@@ -135,12 +148,12 @@ class MultiPassFramebufferManager(FramebufferManager):
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.pass_targets[target_name].texture_id)
                 tex_unit += 1
 
-    def _get_pass_target(self, pass_def) -> Optional[str]:
+    def _get_pass_target(self, pass_def) -> str | None:
         """Extract target name from pass definition."""
-        if hasattr(pass_def, 'target'):
-            return getattr(pass_def, 'target', None)
+        if hasattr(pass_def, "target"):
+            return getattr(pass_def, "target", None)
         elif isinstance(pass_def, dict):
-            return pass_def.get('target')
+            return pass_def.get("target")
         return None
 
     def cleanup_all(self):

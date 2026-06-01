@@ -3,7 +3,7 @@
 import ctypes
 import logging
 import time as _time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import glfw
 import numpy as np
@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class ShaderValidationError(ShaderCompilationError):
     """Raised when shader validation fails due to empty or invalid content."""
+
     pass
 
 
@@ -107,7 +108,8 @@ class RenderResult:
     def to_pil_image(self):
         """Convert the result to a PIL Image."""
         from PIL import Image
-        return Image.fromarray(self.array).convert('RGBA')
+
+        return Image.fromarray(self.array).convert("RGBA")
 
     def __array__(self):
         return self.array
@@ -126,13 +128,28 @@ class QuadRenderer:
         if self.initialized:
             return
 
-        vertices = np.array([
-            # position    # texcoord
-            -1.0, -1.0,   0.0, 0.0,  # bottom-left
-             1.0, -1.0,   1.0, 0.0,  # bottom-right
-            -1.0,  1.0,   0.0, 1.0,  # top-left
-             1.0,  1.0,   1.0, 1.0,  # top-right
-        ], dtype=np.float32)
+        vertices = np.array(
+            [
+                # position    # texcoord
+                -1.0,
+                -1.0,
+                0.0,
+                0.0,  # bottom-left
+                1.0,
+                -1.0,
+                1.0,
+                0.0,  # bottom-right
+                -1.0,
+                1.0,
+                0.0,
+                1.0,  # top-left
+                1.0,
+                1.0,
+                1.0,
+                1.0,  # top-right
+            ],
+            dtype=np.float32,
+        )
 
         self.vao = GL.glGenVertexArrays(1)
         GL.glBindVertexArray(self.vao)
@@ -150,7 +167,11 @@ class QuadRenderer:
         # TexCoord attribute (location = 1)
         GL.glEnableVertexAttribArray(1)
         GL.glVertexAttribPointer(
-            1, 2, GL.GL_FLOAT, GL.GL_FALSE, stride,
+            1,
+            2,
+            GL.GL_FLOAT,
+            GL.GL_FALSE,
+            stride,
             ctypes.c_void_p(2 * vertices.itemsize),
         )
 
@@ -180,7 +201,9 @@ class QuadRenderer:
 class ISFRenderer:
     """Main ISF shader renderer for Python (refactored)."""
 
-    def __init__(self, shader_content: str = '', vertex_shader_content: str = '', glsl_version: str = '330'):
+    def __init__(
+        self, shader_content: str = "", vertex_shader_content: str = "", glsl_version: str = "330"
+    ):
         """Initialize the ISFRenderer with shader content."""
         self.context = GLContextManager()
         self.parser = ISFParser()
@@ -190,9 +213,9 @@ class ISFRenderer:
         self.quad_renderer = QuadRenderer()
         self.framebuffer_manager = FramebufferManager()
 
-        self.metadata: Optional[ISFMetadata] = None
-        self._shader_content = shader_content or ''
-        self._vertex_shader_content = vertex_shader_content or ''
+        self.metadata: ISFMetadata | None = None
+        self._shader_content = shader_content or ""
+        self._vertex_shader_content = vertex_shader_content or ""
         self._glsl_version = glsl_version
 
         # Validate and load shader
@@ -200,18 +223,20 @@ class ISFRenderer:
             raise ShaderValidationError(
                 "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
                 shader_source=self._shader_content,
-                shader_type="fragment"
+                shader_type="fragment",
             )
 
         try:
-            self.metadata = self.load_shader_content(self._shader_content, self._vertex_shader_content)
+            self.metadata = self.load_shader_content(
+                self._shader_content, self._vertex_shader_content
+            )
         except (ISFParseError, ShaderCompilationError):
             raise
         except Exception as e:
             raise ShaderValidationError(
                 f"Shader validation failed: {e}",
                 shader_source=self._shader_content,
-                shader_type="fragment"
+                shader_type="fragment",
             ) from e
 
     def set_input(self, name: str, value: Any):
@@ -228,13 +253,13 @@ class ISFRenderer:
             raise ShaderValidationError("No shader metadata loaded.")
         self.input_manager.set_inputs(inputs, self.metadata)
 
-    def load_shader_content(self, content: str, vertex_shader_content: str = '') -> ISFMetadata:
+    def load_shader_content(self, content: str, vertex_shader_content: str = "") -> ISFMetadata:
         """Parse and compile ISF shader content."""
         if not content.strip():
             raise ShaderValidationError(
                 "Shader content is empty or only whitespace.",
                 shader_source=content,
-                shader_type="fragment"
+                shader_type="fragment",
             )
 
         try:
@@ -248,7 +273,9 @@ class ISFRenderer:
             self.context.initialize()
 
         # Process shaders
-        vertex_source = vertex_shader_content or metadata.vertex_shader or self._default_vertex_shader()
+        vertex_source = (
+            vertex_shader_content or metadata.vertex_shader or self._default_vertex_shader()
+        )
         vertex_source = self._process_vertex_shader(vertex_source, metadata)
         fragment_source = self._process_fragment_shader(glsl_code, metadata)
 
@@ -291,12 +318,12 @@ class ISFRenderer:
         targets = []
         for p in passes:
             target = None
-            if hasattr(p, 'target'):
-                target = getattr(p, 'target', None)
+            if hasattr(p, "target"):
+                target = getattr(p, "target", None)
             elif isinstance(p, dict):
-                target = p.get('target')
+                target = p.get("target")
 
-            if target and target not in targets and target != 'default':
+            if target and target not in targets and target != "default":
                 targets.append(target)
 
         return targets
@@ -305,8 +332,14 @@ class ISFRenderer:
         """Get the default ISF vertex shader."""
         return "void main() {\n  isf_vertShaderInit();\n}\n"
 
-    def render(self, width: int, height: int, inputs: Optional[Dict[str, Any]] = None,
-               metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0) -> RenderResult:
+    def render(
+        self,
+        width: int,
+        height: int,
+        inputs: dict[str, Any] | None = None,
+        metadata: ISFMetadata | None = None,
+        time_offset: float = 0.0,
+    ) -> RenderResult:
         """Render the ISF shader to an offscreen buffer."""
         self.context.make_current()
 
@@ -319,14 +352,20 @@ class ISFRenderer:
         validated_inputs = self.input_manager.get_merged_inputs(inputs, meta)
 
         # Check for multi-pass rendering
-        passes = getattr(meta, 'passes', None) if meta else None
+        passes = getattr(meta, "passes", None) if meta else None
         if passes and len(passes) > 1:
             return self._render_multipass(width, height, validated_inputs, meta, time_offset)
         else:
             return self._render_singlepass(width, height, validated_inputs, meta, time_offset)
 
-    def _render_singlepass(self, width: int, height: int, validated_inputs: Dict[str, ISFValue],
-                          metadata: ISFMetadata, time_offset: float) -> RenderResult:
+    def _render_singlepass(
+        self,
+        width: int,
+        height: int,
+        validated_inputs: dict[str, ISFValue],
+        metadata: ISFMetadata,
+        time_offset: float,
+    ) -> RenderResult:
         """Render single-pass shader."""
         framebuffer = self.framebuffer_manager.create_framebuffer(width, height)
 
@@ -349,8 +388,14 @@ class ISFRenderer:
         finally:
             self.framebuffer_manager.cleanup_framebuffer(framebuffer)
 
-    def _render_multipass(self, width: int, height: int, validated_inputs: Dict[str, ISFValue],
-                         metadata: ISFMetadata, time_offset: float) -> RenderResult:
+    def _render_multipass(
+        self,
+        width: int,
+        height: int,
+        validated_inputs: dict[str, ISFValue],
+        metadata: ISFMetadata,
+        time_offset: float,
+    ) -> RenderResult:
         """Render multi-pass shader."""
         mp_manager = MultiPassFramebufferManager()
 
@@ -359,7 +404,7 @@ class ISFRenderer:
             pass_framebuffers = mp_manager.create_pass_framebuffers(passes, width, height)
 
             # Render each pass
-            for pass_idx, pass_def in enumerate(passes):
+            for pass_idx, _pass_def in enumerate(passes):
                 framebuffer = pass_framebuffers[pass_idx]
 
                 # Create final framebuffer for last pass if needed
@@ -395,7 +440,9 @@ class ISFRenderer:
         finally:
             mp_manager.cleanup_all()
 
-    def _set_standard_uniforms(self, width: int, height: int, time_offset: float, pass_index: int = 0):
+    def _set_standard_uniforms(
+        self, width: int, height: int, time_offset: float, pass_index: int = 0
+    ):
         """Set standard ISF uniforms."""
         self.shader_compiler.set_uniform("PASSINDEX", pass_index)
         self.shader_compiler.set_uniform("RENDERSIZE", [width, height])
@@ -404,7 +451,7 @@ class ISFRenderer:
         self.shader_compiler.set_uniform("DATE", [1970.0, 1.0, 1.0, 0.0])
         self.shader_compiler.set_uniform("FRAMEINDEX", 0)
 
-    def _set_input_uniforms(self, inputs: Dict[str, ISFValue]):
+    def _set_input_uniforms(self, inputs: dict[str, ISFValue]):
         """Set input uniform values."""
         for name, value in inputs.items():
             self.shader_compiler.set_uniform(name, value)
@@ -416,9 +463,15 @@ class ISFRenderer:
             self.shader_compiler.set_uniform(target_name, tex_unit)
             tex_unit += 1
 
-    def render_to_window(self, width: int = 800, height: int = 600, inputs: Optional[Dict[str, Any]] = None,
-                        metadata: Optional[ISFMetadata] = None, time_offset: float = 0.0,
-                        title: str = "ISF Shader Preview"):
+    def render_to_window(
+        self,
+        width: int = 800,
+        height: int = 600,
+        inputs: dict[str, Any] | None = None,
+        metadata: ISFMetadata | None = None,
+        time_offset: float = 0.0,
+        title: str = "ISF Shader Preview",
+    ):
         """Render the shader in a persistent window."""
         try:
             if not self.context.initialized:
@@ -459,8 +512,14 @@ class ISFRenderer:
         finally:
             self.cleanup()
 
-    def save_render(self, output_path: str, width: int = 1920, height: int = 1080,
-                   inputs: Optional[Dict[str, Any]] = None, metadata: Optional[ISFMetadata] = None):
+    def save_render(
+        self,
+        output_path: str,
+        width: int = 1920,
+        height: int = 1080,
+        inputs: dict[str, Any] | None = None,
+        metadata: ISFMetadata | None = None,
+    ):
         """Render the shader and save to a file."""
         render_result = self.render(width, height, inputs, metadata)
         image = render_result.to_pil_image()
