@@ -1,8 +1,8 @@
 [build-system]
 requires = [
-    "setuptools>=61.0", 
-    "wheel", 
-    "setuptools_scm[toml]>=6.2",
+    "setuptools>=61.0",
+    "wheel",
+    "setuptools_scm[toml]>=8",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -19,38 +19,36 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
-    "glfw>=2.5.0",
-    "PyOpenGL>=3.1.0",
-    "PyOpenGL-accelerate>=3.1.0",
-    "json5>=0.9.0",
-    "pillow>=9.0.0",
-    "numpy>=1.21.0",
-    "pydantic>=1.8.0",
+    "glfw>=2.5.0,<3",
+    "PyOpenGL>=3.1.0,<4",
+    "json5>=0.9.0,<1",
+    "pillow>=9.0.0,<12",
+    "numpy>=1.21.0,<3",
+    "pydantic>=2.0,<3",
 ]
 
 [project.optional-dependencies]
+accelerated = [
+    "PyOpenGL-accelerate>=3.1.0,<4",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "black>=22.0.0",
-    "isort>=5.0.0",
-    "flake8>=5.0.0",
+    "ruff>=0.5.0",
     "mypy>=1.0.0",
-    "pre-commit>=2.20.0",
-    "cibuildwheel>=3.0.0",
-    "build>=0.10.0",
+    "pre-commit>=3.0.0",
+    "build>=1.0.0",
 ]
 
 [project.urls]
@@ -63,33 +61,49 @@ Issues = "https://github.com/jimcortez/pyvvisf/issues"
 where = ["src"]
 
 [tool.setuptools_scm]
-write_to = "src/pyvvisf/_version.py"
+version_file = "src/pyvvisf/_version.py"
 
-[tool.black]
-line-length = 88
-target-version = ['py38']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "src/pyvvisf/_version.py",
+]
 
-[tool.isort]
-profile = "black"
-multi_line_output = 3
-line_length = 88
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    # Long lines are mostly inside multi-line GLSL string literals.
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Sphinx conf.py needs to manipulate sys.path before importing the package.
+"docs/source/conf.py" = ["E402"]
+# Tests embed multi-line GLSL fragments with intentional whitespace.
+# F841/SIM117/RUF059 are common in pytest patterns (`as renderer:` for context,
+# tuple unpacking where only one element is asserted on).
+"tests/**" = ["W291", "W293", "F841", "SIM117", "RUF059"]
+# The shader-skeleton string constants contain authored whitespace.
+"src/pyvvisf/shader_compiler.py" = ["W291", "W293"]
+# Examples are demos and may use loose import patterns.
+"examples/**" = ["F401", "B007", "SIM105"]
+
+[tool.ruff.format]
+quote-style = "double"
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -111,4 +125,6 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-] 
+    "--cov=pyvvisf",
+    "--cov-report=term-missing",
+]

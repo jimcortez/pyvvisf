@@ -1,4 +1,4 @@
-sphinx
-myst-parser
-sphinx-autodoc-typehints
-sphinx_rtd_theme 
+sphinx>=7.0,<9
+myst-parser>=2.0,<5
+sphinx-autodoc-typehints>=1.25,<4
+sphinx_rtd_theme>=2.0,<4

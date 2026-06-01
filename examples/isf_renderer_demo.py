@@ -8,8 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 try:
-    import pyvvisf
     from PIL import Image
+
+    import pyvvisf
 except ImportError as e:
     print(f"Error importing pyvvisf: {e}")
     print("Please ensure pyvvisf is built and installed correctly.")
@@ -26,7 +27,7 @@ def main():
     # shader_path = Path(__file__).parent / "shaders" / "shapes.fs"
     # shader_path = Path(__file__).parent / "shaders" / "simple.fs"
 
-    with open(shader_path, "r") as f:
+    with open(shader_path) as f:
         shader_content = f.read()
 
     with pyvvisf.ISFRenderer(shader_content) as renderer:
@@ -56,4 +57,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
