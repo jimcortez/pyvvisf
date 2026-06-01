@@ -11,8 +11,19 @@ logger = logging.getLogger(__name__)
 # Versions to probe, ordered ascending. 110-150 use the legacy
 # attribute/varying syntax; 330+ use the modern in/out + layout-location form.
 CANDIDATE_VERSIONS = [
-    "110", "120", "130", "140", "150",
-    "330", "400", "410", "420", "430", "440", "450", "460",
+    "110",
+    "120",
+    "130",
+    "140",
+    "150",
+    "330",
+    "400",
+    "410",
+    "420",
+    "430",
+    "440",
+    "450",
+    "460",
 ]
 
 # Conservative fallback when the GL context refuses to report version info.

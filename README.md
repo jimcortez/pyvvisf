@@ -118,6 +118,21 @@ pip install -e ".[dev]"
 pytest
 ```
 
+### Running headless (Docker, CI, servers)
+
+pyvvisf needs a real OpenGL context. On a headless Linux box, wrap the
+process in `xvfb-run`:
+
+```bash
+sudo apt-get install -y xvfb
+xvfb-run -a python my_render_script.py
+```
+
+In GitHub Actions, the
+[`pyvista/setup-headless-display-action`](https://github.com/pyvista/setup-headless-display-action)
+step provides a display on Linux, macOS, and Windows runners — see
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) for an example.
+
 ## License
 
 See [LICENSE](LICENSE) — MIT.
