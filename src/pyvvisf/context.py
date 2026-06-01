@@ -15,11 +15,21 @@ logger = logging.getLogger(__name__)
 _glfw_init_refcount = 0
 
 
+def _glfw_error_callback(error: int, description):
+    """Forward GLFW errors into our logger so init/create-window failures
+    don't surface as the bare 'Failed to create GLFW window' message."""
+    if isinstance(description, bytes):
+        description = description.decode("utf-8", errors="replace")
+    logger.warning("GLFW error 0x%X: %s", error, description)
+
+
 def _glfw_acquire():
     """Initialize GLFW (if needed) and bump the refcount."""
     global _glfw_init_refcount
-    if _glfw_init_refcount == 0 and not glfw.init():
-        raise ContextError("Failed to initialize GLFW")
+    if _glfw_init_refcount == 0:
+        glfw.set_error_callback(_glfw_error_callback)
+        if not glfw.init():
+            raise ContextError("Failed to initialize GLFW")
     _glfw_init_refcount += 1
 
 
@@ -65,7 +75,11 @@ class GLContextManager:
 
             self.window = glfw.create_window(width, height, "ISF Renderer", None, None)
             if not self.window:
-                raise ContextError("Failed to create GLFW window")
+                raise ContextError(
+                    "Failed to create GLFW window. "
+                    "On macOS this often means the runner has no graphics "
+                    "session; on Linux, no DISPLAY / Xvfb is available."
+                )
 
             glfw.make_context_current(self.window)
 

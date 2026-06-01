@@ -44,6 +44,12 @@ jobs:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     needs: lint
     runs-on: ${{ matrix.os }}
+    # macOS GitHub-hosted runners don't expose a Cocoa graphics session that
+    # GLFW can attach to, so windowed-context tests fail there even with
+    # `pyvista/setup-headless-display-action`. We still run the matrix cell
+    # so parser/validation tests that don't open a GL context are exercised,
+    # but failures don't block the PR. Tracked for follow-up.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,4 +75,5 @@ jobs:
         uses: pyvista/setup-headless-display-action@v3
 
       - name: Run tests
-        run: pytest tests/ -v
+        # Show the full GLFW error reason on stderr if context creation fails.
+        run: pytest tests/ -v --log-cli-level=WARNING

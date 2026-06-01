@@ -38,6 +38,13 @@ GitHub Actions uses
 [`pyvista/setup-headless-display-action`](https://github.com/pyvista/setup-headless-display-action)
 to provide a display on every OS in the matrix.
 
+> **macOS CI caveat.** GitHub-hosted macOS runners don't reliably expose a
+> Cocoa graphics session that GLFW can attach to, so tests that open an
+> OpenGL context are flaky there. The macOS matrix cells run with
+> `continue-on-error: true` — they exercise parser and validation paths,
+> but their failures don't gate PRs. macOS is fully supported as a
+> *user* platform; this is purely a CI environment limitation.
+
 ## Lint, format, type-check
 
 ```bash
