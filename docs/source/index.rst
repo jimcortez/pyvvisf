@@ -63,7 +63,7 @@ Here's a minimal example using a well-formed ISF shader:
         image.save("output_green.png")
 
 GLSL Version Support
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 pyvvisf supports multiple GLSL versions and can automatically detect which versions are supported on your system:
 
@@ -127,7 +127,7 @@ The :meth:`set_inputs` method is a convenience function that takes a dictionary 
 You do not need to use ISFColor, ISFPoint2D, or other ISF value classes directly.
 
 ISF Features
------------
+------------
 
 pyvvisf supports the full ISF 2.0 specification including:
 
@@ -228,6 +228,6 @@ API Details
     :show-inheritance:
 
 Utility Functions
-================
+=================
 
 .. autofunction:: pyvvisf.get_supported_glsl_versions 

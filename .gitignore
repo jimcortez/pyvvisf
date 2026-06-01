@@ -1,5 +1,4 @@
 src/pyvvisf/_version.py
-external
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

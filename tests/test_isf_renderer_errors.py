@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """Tests for ISFRenderer error handling."""
 
-import sys
-from pathlib import Path
-
-# Add the src directory to the path for the test
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 import pytest
 
 import pyvvisf

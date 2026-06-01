@@ -10,8 +10,15 @@ project = "pyvvisf"
 copyright = "2025, pyvvisf contributors"
 author = "pyvvisf contributors"
 
-version = "1.0"
-release = "1.0"
+# Pull the version from the installed package metadata so RTD/docs builds
+# stay in sync with setuptools_scm-generated _version.py.
+try:
+    from importlib.metadata import version as _pkg_version
+
+    release = _pkg_version("pyvvisf")
+except Exception:
+    release = "0.0.0"
+version = ".".join(release.split(".")[:2])
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

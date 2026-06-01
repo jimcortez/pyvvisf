@@ -1,24 +1,21 @@
-"""Refactored ISF shader renderer with separated concerns."""
+"""ISF shader renderer entry point."""
 
-import ctypes
 import logging
 import time as _time
 from typing import Any
 
 import glfw
 import numpy as np
-from OpenGL import GL
 
-from .errors import (
-    ContextError,
-    ISFParseError,
-    RenderingError,
-    ShaderCompilationError,
-)
+from .context import GLContextManager
+from .errors import ISFParseError, RenderingError, ShaderCompilationError
 from .framebuffer_manager import FramebufferManager, MultiPassFramebufferManager
 from .input_manager import InputManager
 from .parser import ISFMetadata, ISFParser
-from .shader_compiler import ISFShaderProcessor, ShaderCompiler
+from .quad import QuadRenderer
+from .result import RenderResult
+from .shader_compiler import ShaderCompiler
+from .shader_processor import ISFShaderProcessor
 from .types import ISFValue
 
 logger = logging.getLogger(__name__)
@@ -30,179 +27,14 @@ class ShaderValidationError(ShaderCompilationError):
     pass
 
 
-class GLContextManager:
-    """Manages the creation and lifetime of a GLFW OpenGL context."""
-
-    def __init__(self):
-        self.window = None
-        self.initialized = False
-        self.visible = False
-
-    def initialize(self, width: int = 1, height: int = 1, visible: bool = False):
-        """Initialize GLFW and create an OpenGL context.
-
-        The window is hidden by default so that offscreen rendering does not
-        flash a visible window on macOS/Windows. Pass ``visible=True`` (or call
-        :meth:`show_window` later) when you need an interactive window.
-        """
-        if self.initialized:
-            return
-
-        if not glfw.init():
-            raise ContextError("Failed to initialize GLFW")
-
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        glfw.window_hint(glfw.VISIBLE, glfw.TRUE if visible else glfw.FALSE)
-
-        self.window = glfw.create_window(width, height, "ISF Renderer", None, None)
-        if not self.window:
-            glfw.terminate()
-            raise ContextError("Failed to create GLFW window")
-
-        glfw.make_context_current(self.window)
-
-        GL.glClearColor(0.0, 0.0, 0.0, 1.0)
-        GL.glEnable(GL.GL_DEPTH_TEST)
-
-        self.initialized = True
-        self.visible = visible
-        logger.info("GLFW context initialized successfully")
-
-    def show_window(self):
-        """Make the window visible (used when entering interactive window mode)."""
-        if self.window and not self.visible:
-            glfw.show_window(self.window)
-            self.visible = True
-
-    def make_current(self):
-        """Make this OpenGL context current."""
-        if self.window:
-            glfw.make_context_current(self.window)
-
-    def cleanup(self):
-        """Destroy the OpenGL context and release GLFW resources."""
-        if self.window:
-            glfw.destroy_window(self.window)
-            self.window = None
-
-        if self.initialized:
-            glfw.terminate()
-            self.initialized = False
-            self.visible = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
-
-
-class RenderResult:
-    """Wrapper for a rendered image result."""
-
-    def __init__(self, array):
-        self.array = array
-
-    def to_pil_image(self):
-        """Convert the result to a PIL Image."""
-        from PIL import Image
-
-        return Image.fromarray(self.array).convert("RGBA")
-
-    def __array__(self):
-        return self.array
-
-
-class QuadRenderer:
-    """Handles rendering a full-screen quad."""
-
-    def __init__(self):
-        self.vao = None
-        self.vbo = None
-        self.initialized = False
-
-    def initialize(self):
-        """Setup the quad geometry."""
-        if self.initialized:
-            return
-
-        vertices = np.array(
-            [
-                # position    # texcoord
-                -1.0,
-                -1.0,
-                0.0,
-                0.0,  # bottom-left
-                1.0,
-                -1.0,
-                1.0,
-                0.0,  # bottom-right
-                -1.0,
-                1.0,
-                0.0,
-                1.0,  # top-left
-                1.0,
-                1.0,
-                1.0,
-                1.0,  # top-right
-            ],
-            dtype=np.float32,
-        )
-
-        self.vao = GL.glGenVertexArrays(1)
-        GL.glBindVertexArray(self.vao)
-
-        self.vbo = GL.glGenBuffers(1)
-        GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
-        GL.glBufferData(GL.GL_ARRAY_BUFFER, vertices.nbytes, vertices, GL.GL_STATIC_DRAW)
-
-        stride = 4 * vertices.itemsize  # 4 floats per vertex
-
-        # Position attribute (location = 0)
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, GL.GL_FALSE, stride, ctypes.c_void_p(0))
-
-        # TexCoord attribute (location = 1)
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(
-            1,
-            2,
-            GL.GL_FLOAT,
-            GL.GL_FALSE,
-            stride,
-            ctypes.c_void_p(2 * vertices.itemsize),
-        )
-
-        GL.glBindVertexArray(0)
-        self.initialized = True
-
-    def draw(self):
-        """Draw the quad."""
-        if not self.initialized:
-            self.initialize()
-
-        GL.glBindVertexArray(self.vao)
-        GL.glDrawArrays(GL.GL_TRIANGLE_STRIP, 0, 4)
-        GL.glBindVertexArray(0)
-
-    def cleanup(self):
-        """Clean up OpenGL resources."""
-        if self.vao:
-            GL.glDeleteVertexArrays(1, [self.vao])
-            self.vao = None
-        if self.vbo:
-            GL.glDeleteBuffers(1, [self.vbo])
-            self.vbo = None
-        self.initialized = False
-
-
 class ISFRenderer:
-    """Main ISF shader renderer for Python (refactored)."""
+    """Main ISF shader renderer for Python."""
 
     def __init__(
-        self, shader_content: str = "", vertex_shader_content: str = "", glsl_version: str = "330"
+        self,
+        shader_content: str = "",
+        vertex_shader_content: str = "",
+        glsl_version: str = "330",
     ):
         """Initialize the ISFRenderer with shader content."""
         self.context = GLContextManager()
@@ -218,7 +50,6 @@ class ISFRenderer:
         self._vertex_shader_content = vertex_shader_content or ""
         self._glsl_version = glsl_version
 
-        # Validate and load shader
         if not self._shader_content.strip():
             raise ShaderValidationError(
                 "Shader content is empty or only whitespace. Please provide valid ISF shader code.",
@@ -272,50 +103,39 @@ class ISFRenderer:
         if not self.context.initialized:
             self.context.initialize()
 
-        # Process shaders
         vertex_source = (
             vertex_shader_content or metadata.vertex_shader or self._default_vertex_shader()
         )
         vertex_source = self._process_vertex_shader(vertex_source, metadata)
         fragment_source = self._process_fragment_shader(glsl_code, metadata)
 
-        # Compile shaders
         expected_uniforms = [inp.name for inp in metadata.inputs] if metadata.inputs else []
         try:
             self.shader_compiler.create_program(vertex_source, fragment_source, expected_uniforms)
         except ShaderCompilationError as e:
             raise ShaderValidationError(f"Shader compilation failed: {e}") from e
 
-        # Initialize quad renderer
         self.quad_renderer.initialize()
 
         return metadata
 
     def _process_vertex_shader(self, source: str, metadata: ISFMetadata) -> str:
         """Process vertex shader source using ISF processor."""
-        # Use the new ISF processor for proper ISF shader handling
         processed_source = self.isf_processor.process_vertex_shader(source, metadata)
-
-        # Add version directive if needed
         if "#version" not in processed_source:
             processed_source = f"#version {self._glsl_version}\n{processed_source}"
-
         return processed_source
 
     def _process_fragment_shader(self, source: str, metadata: ISFMetadata) -> str:
         """Process fragment shader source using ISF processor."""
-        # Use the new ISF processor for proper ISF shader handling
         processed_source = self.isf_processor.process_fragment_shader(source, metadata)
-
-        # Add version directive if needed
         if "#version" not in processed_source:
             processed_source = f"#version {self._glsl_version}\n{processed_source}"
-
         return processed_source
 
     def _extract_pass_targets(self, passes) -> list[str]:
         """Extract target names from passes."""
-        targets = []
+        targets: list[str] = []
         for p in passes:
             target = None
             if hasattr(p, "target"):
@@ -351,12 +171,10 @@ class ISFRenderer:
             raise ShaderValidationError("No shader metadata loaded.")
         validated_inputs = self.input_manager.get_merged_inputs(inputs, meta)
 
-        # Check for multi-pass rendering
         passes = getattr(meta, "passes", None) if meta else None
         if passes and len(passes) > 1:
             return self._render_multipass(width, height, validated_inputs, meta, time_offset)
-        else:
-            return self._render_singlepass(width, height, validated_inputs, meta, time_offset)
+        return self._render_singlepass(width, height, validated_inputs, meta, time_offset)
 
     def _render_singlepass(
         self,
@@ -403,11 +221,9 @@ class ISFRenderer:
             passes = metadata.passes
             pass_framebuffers = mp_manager.create_pass_framebuffers(passes, width, height)
 
-            # Render each pass
             for pass_idx, _pass_def in enumerate(passes):
                 framebuffer = pass_framebuffers[pass_idx]
 
-                # Create final framebuffer for last pass if needed
                 if framebuffer is None:
                     framebuffer = mp_manager.create_framebuffer(width, height)
                     pass_framebuffers[pass_idx] = framebuffer
@@ -419,14 +235,12 @@ class ISFRenderer:
                 self._set_standard_uniforms(width, height, time_offset, pass_idx)
                 self._set_input_uniforms(validated_inputs)
 
-                # Bind previous pass targets
                 targets = self._extract_pass_targets(passes[:pass_idx])
                 mp_manager.bind_target_textures(targets)
                 self._set_target_uniforms(targets, mp_manager)
 
                 self.quad_renderer.draw()
 
-            # Read pixels from final pass
             final_framebuffer = pass_framebuffers[-1]
             if final_framebuffer is None:
                 raise RenderingError("Final framebuffer is None in multipass rendering.")
