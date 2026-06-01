@@ -2,9 +2,12 @@
 
 Pure Python ISF (Interactive Shader Format) renderer built on PyOpenGL.
 
+[![CI](https://github.com/jimcortez/pyvvisf/actions/workflows/ci.yml/badge.svg)](https://github.com/jimcortez/pyvvisf/actions/workflows/ci.yml)
 [![Read the Docs](https://readthedocs.org/projects/pyvvisf/badge/?version=latest)](https://pyvvisf.readthedocs.io/)
-[![GitHub release](https://img.shields.io/github/v/release/jimcortez/pyvvisf?style=flat)](https://github.com/jimcortez/pyvvisf/releases)
 [![PyPI version](https://img.shields.io/pypi/v/pyvvisf.svg)](https://pypi.org/project/pyvvisf/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pyvvisf.svg)](https://pypi.org/project/pyvvisf/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/jimcortez/pyvvisf?style=flat)](https://github.com/jimcortez/pyvvisf/releases)
 
 ![isf_window_demo.py running shapes.fs](assets/shapes_window.png)
 
@@ -37,7 +40,7 @@ See the [docs](https://pyvvisf.readthedocs.io/) for a comprehensive overview.
 
 ### Requirements
 
-* Python 3.8+
+* Python 3.10+
 * A working OpenGL driver (the renderer uses GLFW + PyOpenGL)
 
 ### Setup Instructions
