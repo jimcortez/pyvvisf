@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-06-02
+
+Infrastructure-only release. The wheel and sdist are functionally
+identical to 0.8.1; no public-API or runtime behavior changed.
+
+### Infrastructure
+
+- **`attest-and-attach` release job** now passes `--repo` to
+  `gh release upload`, so the GitHub Release page receives the sdist
+  and wheel attachments automatically without needing an
+  `actions/checkout` step. In 0.8.1 this step failed (`fatal: not a git
+  repository`) and the dists had to be uploaded manually; this release
+  validates the fix end-to-end.
+
 ## [0.8.1] — 2026-06-02
 
 This is an infrastructure-only release. The published wheel and sdist are
