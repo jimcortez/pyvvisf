@@ -172,4 +172,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate-release.outputs.tag }}
-        run: gh release upload "${TAG}" dist/* --clobber
+          REPO: ${{ github.repository }}
+        # --repo avoids `gh` shelling out to git for repo detection; this
+        # job has no checkout step and therefore no .git directory.
+        run: gh release upload "${TAG}" dist/* --clobber --repo "${REPO}"
