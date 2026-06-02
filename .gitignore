@@ -211,4 +211,4 @@ external/VVISF-GL/VVISF/obj/
 
 # Test outputs
 test_output/
-*.log 
+*.log

@@ -16,4 +16,4 @@ void main() {
         vec4 c = IMG_THIS_NORM_PIXEL(redBuffer);
         gl_FragColor = vec4(c.b, c.g, c.r, c.a); // Swap R/B (should be blue)
     }
-} 
+}
