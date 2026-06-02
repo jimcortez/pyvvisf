@@ -230,4 +230,4 @@ API Details
 Utility Functions
 =================
 
-.. autofunction:: pyvvisf.get_supported_glsl_versions 
+.. autofunction:: pyvvisf.get_supported_glsl_versions

@@ -4,8 +4,11 @@ Test time offset functionality in pyvvisf.
 """
 
 import numpy as np
+import pytest
 
 import pyvvisf
+
+pytestmark = pytest.mark.graphics
 
 # Simple animated shader for testing
 TEST_SHADER = """

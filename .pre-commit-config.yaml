@@ -3,6 +3,10 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
+        # Mirrors the ruff per-file-ignores in pyproject.toml: these files
+        # contain authored-whitespace GLSL string literals where W291/W293
+        # are intentionally allowed.
+        exclude: ^(tests/.*\.py|src/pyvvisf/shader_compiler\.py)$
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
@@ -11,7 +15,7 @@ repos:
         args: ["--maxkb=512"]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.7
+    rev: v0.15.0
     hooks:
       - id: ruff
         args: ["--fix"]

@@ -5,6 +5,8 @@ import pytest
 
 import pyvvisf
 
+pytestmark = pytest.mark.graphics
+
 # Use top-level pyvvisf exceptions
 ISFParseError = pyvvisf.ISFParseError
 ShaderCompilationError = pyvvisf.ShaderCompilationError

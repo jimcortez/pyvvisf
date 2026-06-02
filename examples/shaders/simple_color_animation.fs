@@ -11,4 +11,4 @@
 void main() {
     float t = 0.5 + 0.5 * sin(TIME);
     gl_FragColor = mix(colorA, colorB, t);
-} 
+}

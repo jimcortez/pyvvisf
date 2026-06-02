@@ -50,4 +50,4 @@ void main() {
     color += ringColor * ringVal * (1.0 - c) * (1.0 - r);
     color.a = 1.0;
     gl_FragColor = color;
-} 
+}

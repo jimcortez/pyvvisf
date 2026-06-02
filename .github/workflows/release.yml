@@ -8,10 +8,82 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    name: Build sdist and wheel
+  validate-release:
+    name: Validate release metadata
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.parse.outputs.tag }}
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Parse and validate tag format
+        id: parse
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          echo "Release tag: ${TAG}"
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' does not match v-prefixed PEP 440 format. Expected e.g. v0.8.0, v1.2.3rc1, v0.9.0.dev1." >&2
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Verify CHANGELOG entry matches tag
+        env:
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Find the first non-[Unreleased] level-2 heading in CHANGELOG.md and
+          # confirm it matches the tag's version. Format: `## [X.Y.Z] — DATE`.
+          FIRST_RELEASED=$(grep -E '^## \[[^]]+\]' CHANGELOG.md \
+            | grep -v '\[Unreleased\]' \
+            | head -n 1 \
+            | sed -E 's/^## \[([^]]+)\].*/\1/')
+          echo "Latest CHANGELOG entry: ${FIRST_RELEASED}"
+          if [[ "${FIRST_RELEASED}" != "${VERSION}" ]]; then
+            echo "::error::CHANGELOG.md latest released entry is '${FIRST_RELEASED}' but tag version is '${VERSION}'." >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: pyproject.toml
+
+      - name: Verify setuptools_scm resolves the tag
+        env:
+          VERSION: ${{ steps.parse.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install "setuptools_scm[toml]>=8"
+          RESOLVED=$(python -m setuptools_scm)
+          echo "setuptools_scm resolved: ${RESOLVED}"
+          if [[ "${RESOLVED}" != "${VERSION}" ]]; then
+            echo "::error::setuptools_scm resolved '${RESOLVED}' but tag version is '${VERSION}'." >&2
+            exit 1
+          fi
+
+  build:
+    name: Build sdist and pure-Python wheel
+    needs: validate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -33,25 +105,71 @@ jobs:
       - name: Build distributions
         run: python -m build
 
+      - name: Check distributions with twine
+        run: pipx run twine check --strict dist/*
+
+      - name: Smoke-install built wheel
+        env:
+          EXPECTED_VERSION: ${{ needs.validate-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/smoke-venv
+          /tmp/smoke-venv/bin/pip install --upgrade pip
+          /tmp/smoke-venv/bin/pip install dist/*.whl
+          INSTALLED=$(/tmp/smoke-venv/bin/python -c "import pyvvisf; print(pyvvisf.__version__)")
+          echo "Installed version: ${INSTALLED}"
+          if [[ "${INSTALLED}" != "${EXPECTED_VERSION}" ]]; then
+            echo "::error::Smoke-install reports '${INSTALLED}' but tag version is '${EXPECTED_VERSION}'." >&2
+            exit 1
+          fi
+
       - name: Upload distributions
         uses: actions/upload-artifact@v7
         with:
           name: release-dists
           path: dist/
 
-  publish:
-    name: Publish to PyPI
+  publish-pypi:
+    name: Publish to PyPI (OIDC trusted publishing)
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       id-token: write
     steps:
       - name: Download distributions
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           name: release-dists
           path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  attest-and-attach:
+    name: Attest provenance and attach to GitHub Release
+    needs: [validate-release, publish-pypi]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      attestations: write
+      contents: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v7
+        with:
+          name: release-dists
+          path: dist/
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "dist/*"
+
+      - name: Attach distributions to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate-release.outputs.tag }}
+        run: gh release upload "${TAG}" dist/* --clobber
