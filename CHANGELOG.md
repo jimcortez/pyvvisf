@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-02
+
+This is an infrastructure-only release. The published wheel and sdist are
+functionally identical to 0.8.0; no public-API or runtime behavior changed.
+The release exists to validate the new release pipeline end-to-end and to
+ship the first build with provenance attestations and GitHub Release
+artifacts.
+
+### Infrastructure
+
+- **Release pipeline rewritten** as four named, dependency-chained jobs in
+  `.github/workflows/release.yml`: `validate-release` → `build` →
+  `publish-pypi` → `attest-and-attach`. The validate job fail-fasts in
+  seconds on malformed tags, CHANGELOG/tag drift, or `setuptools_scm`
+  mismatches, before any build runs. Build adds `twine check --strict` and
+  a clean-venv smoke install. Publish keeps OIDC trusted publishing.
+  Attest emits SLSA build provenance and uploads sdist + wheel to the
+  GitHub Release page.
+- **Tag-format policy** enforced: new releases must use v-prefixed PEP 440
+  tags (e.g. `v0.8.1`). `[tool.setuptools_scm].tag_regex` in
+  `pyproject.toml` is pinned accordingly. CONTRIBUTING.md documents the
+  procedure and recovery flow.
+- **CI hardening:** new `pre-commit` and `package-build` jobs gate every
+  PR (so packaging regressions fail in PR CI, not at release). macOS test
+  step split by a new `graphics` pytest marker so only GL-context tests
+  remain advisory; non-graphics tests now gate macOS too. Coverage XML
+  uploaded as a build artifact.
+- **New `security.yml` workflow** runs `pip-audit` weekly and on every
+  pull request.
+- **Docs and CodeQL** workflows gain release-tag triggers, explicit job
+  names, workflow-level `permissions: contents: read`, and per-job
+  `timeout-minutes`.
+- **`.pre-commit-config.yaml`** — bumped `ruff-pre-commit` to `v0.15.0`
+  to match the actual ruff in use; `trailing-whitespace` now mirrors the
+  ruff per-file W291/W293 exemption for `tests/**` and
+  `shader_compiler.py`.
+
 ## [0.8.0] — 2026-06-01
 
 This release is a stability, portability, and maintenance overhaul. The
