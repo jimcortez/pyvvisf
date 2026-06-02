@@ -2,8 +2,11 @@
 """Tests for ISFRenderer normal (non-error) cases."""
 
 import numpy as np
+import pytest
 
 import pyvvisf
+
+pytestmark = pytest.mark.graphics
 
 
 class TestISFRenderer:

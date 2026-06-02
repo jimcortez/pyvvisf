@@ -75,6 +75,66 @@ before pushing rather than re-pushing to chase warnings.
   to flag platform-specific issues; the project's `Operating System ::
   OS Independent` classifier is verified, not aspirational.
 
+## Cutting a release
+
+Releases are triggered by publishing a GitHub Release whose tag matches the
+project's tag-format policy. The `validate-release` job in
+[.github/workflows/release.yml](.github/workflows/release.yml) enforces the
+format and will fail-fast on anything else.
+
+**Tag format.** All new releases use a v-prefixed PEP 440 version. The
+allowed shapes are:
+
+```
+v0.8.0           v1.2.3rc1        v0.9.0.dev1        v1.0.0.post1
+```
+
+This is a deliberate convention break from the bare-numeric history
+(`0.3.0`...`0.7.1`); going forward, only v-prefixed tags are accepted.
+Older bare-numeric tags remain in `git` history for `setuptools_scm`'s
+`git describe` walks but cannot be used to publish.
+
+**Release procedure.**
+
+1. Land a PR that updates `CHANGELOG.md`: rename the `## [Unreleased]`
+   heading to `## [X.Y.Z] — YYYY-MM-DD` (em-dash, ISO date) and add a fresh
+   empty `## [Unreleased]` heading above it.
+2. Confirm `main` is green on CI and that the `package-build` job has
+   built and smoke-installed the wheel against the current tree.
+3. Create the release. The tag and the `--target` should both point at the
+   commit you intend to ship.
+
+   ```bash
+   gh release create vX.Y.Z \
+     --target main \
+     --title "vX.Y.Z" \
+     --generate-notes
+   ```
+
+4. Watch the four-job release pipeline run to completion:
+   `validate-release` → `build` → `publish-pypi` → `attest-and-attach`.
+   When green, the wheel + sdist are on PyPI, attached to the GitHub
+   Release, and have a SLSA build provenance attestation.
+5. Verify in a clean environment:
+
+   ```bash
+   pipx install pyvvisf==X.Y.Z
+   python -c "import pyvvisf; print(pyvvisf.__version__)"
+   ```
+
+**If the release fails.** The validate-release job runs in seconds with no
+install, so the most common failure (malformed tag, CHANGELOG out of sync)
+fails before the build runs. Delete the release, fix the underlying issue,
+and re-create:
+
+```bash
+gh release delete vX.Y.Z --cleanup-tag --yes
+```
+
+`--cleanup-tag` removes both the GitHub Release and the underlying git tag
+in one shot, leaving you free to re-tag and re-publish without manual
+cleanup.
+
 ## Reporting bugs
 
 Use the GitHub
