@@ -127,7 +127,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Set up headless display
-        uses: pyvista/setup-headless-display-action@v4
+        uses: pyvista/setup-headless-display-action@v5
 
       # Linux/Windows: run the full suite as a single required step.
       - name: Run tests
